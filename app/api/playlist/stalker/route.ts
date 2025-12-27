@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeMac, normalizeStalkerUrl } from "@/lib/validation";
 
+function asObj(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+}
+
 function absolutizeMaybe(base: string, maybeUrl: string): string {
   // Stalker returns logos as absolute, protocol-relative, or relative paths.
   // We normalize them so the frontend can proxy them reliably.
@@ -23,7 +27,7 @@ function absolutizeMaybe(base: string, maybeUrl: string): string {
   }
 }
 
-function isReal(v: any): boolean {
+function isReal(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   const s = String(v).trim();
   if (!s) return false;
@@ -54,6 +58,24 @@ type StalkerChannel = {
   logo?: string;
 };
 
+type StalkerGenrePayload = {
+  id?: unknown;
+  title?: unknown;
+  name?: unknown;
+};
+
+type StalkerChannelPayload = {
+  id?: unknown;
+  ch_id?: unknown;
+  name?: unknown;
+  title?: unknown;
+  logo?: unknown;
+  logo_64?: unknown;
+  logo_128?: unknown;
+  screenshot_uri?: unknown;
+  tv_genre_logo?: unknown;
+};
+
 async function tryPortalPhp(baseUrl: string, mac: string) {
   // Authenticate via portal.php handshake and return headers for follow-up calls.
   const handshakeUrl = `${baseUrl}/portal.php?type=stb&action=handshake&JsHttpRequest=1-xml`;
@@ -76,7 +98,7 @@ async function tryPortalPhp(baseUrl: string, mac: string) {
 
   if (!res.ok) throw new Error(`Handshake failed (HTTP ${res.status}).`);
   const j = await safeJson(res);
-  const token = j?.js?.token;
+  const token = asObj(asObj(j)["js"])["token"];
   if (!isReal(token)) throw new Error("Handshake did not return a token.");
 
   const authedCookies = {
@@ -120,7 +142,7 @@ async function tryStalkerPortalLoadPhp(origin: string, mac: string) {
 
   if (!res.ok) throw new Error(`Handshake failed (HTTP ${res.status}).`);
   const j = await safeJson(res);
-  const token = j?.js?.token;
+  const token = asObj(asObj(j)["js"])["token"];
   if (!isReal(token)) throw new Error("Handshake did not return a token.");
 
   const authedCookies = { ...cookies, token: String(token) };
@@ -138,9 +160,10 @@ async function tryStalkerPortalLoadPhp(origin: string, mac: string) {
   return { baseUrl, headers };
 }
 
-function pickLogo(item: any): string {
+function pickLogo(item: unknown): string {
   // Different portal builds use different logo fields; we scan common candidates.
-  const candidates = [item?.logo, item?.logo_64, item?.logo_128, item?.screenshot_uri, item?.tv_genre_logo];
+  const o = asObj(item) as StalkerChannelPayload;
+  const candidates = [o.logo, o.logo_64, o.logo_128, o.screenshot_uri, o.tv_genre_logo];
   for (const c of candidates) {
     if (isReal(c)) return String(c).trim();
   }
@@ -181,7 +204,7 @@ export async function POST(req: Request) {
       `${origin}/stalker_portal/server/load.php?type=itv&action=get_genres&JsHttpRequest=1-xml`,
     ];
 
-    let genresPayload: any = null;
+    let genresPayload: unknown = null;
     for (const u of genreUrls) {
       const res = await fetchWithTimeout(u, { headers, timeoutMs: 20000 });
       if (res.ok) {
@@ -190,12 +213,13 @@ export async function POST(req: Request) {
       }
     }
 
-    const jsGenres = genresPayload?.js;
+    const jsGenres = asObj(genresPayload)["js"];
     const genres: StalkerGenre[] = Array.isArray(jsGenres)
       ? jsGenres
-          .map((g: any) => {
-            const id = isReal(g?.id) ? String(g.id).trim() : "";
-            const name = isReal(g?.title) ? String(g.title).trim() : isReal(g?.name) ? String(g.name).trim() : "";
+          .map((g: unknown) => {
+            const gg = asObj(g) as StalkerGenrePayload;
+            const id = isReal(gg.id) ? String(gg.id).trim() : "";
+            const name = isReal(gg.title) ? String(gg.title).trim() : isReal(gg.name) ? String(gg.name).trim() : "";
             return { id, name };
           })
           .filter((g: StalkerGenre) => g.id && g.name)
@@ -209,7 +233,7 @@ export async function POST(req: Request) {
         `${origin}/stalker_portal/server/load.php?type=itv&action=get_ordered_list&genre=${encodeURIComponent(genreId)}&p=${page}&JsHttpRequest=1-xml`,
       ];
 
-      let listPayload: any = null;
+      let listPayload: unknown = null;
       for (const u of listUrls) {
         const res = await fetchWithTimeout(u, { headers, timeoutMs: 25000 });
         if (res.ok) {
@@ -218,13 +242,15 @@ export async function POST(req: Request) {
         }
       }
 
-      const js = listPayload?.js;
-      const data = Array.isArray(js?.data) ? js.data : Array.isArray(js) ? js : null;
+      const js = asObj(listPayload)["js"];
+      const jsObj = asObj(js);
+      const data = Array.isArray(jsObj["data"]) ? (jsObj["data"] as unknown[]) : Array.isArray(js) ? (js as unknown[]) : null;
       if (Array.isArray(data)) {
         channels = data
-          .map((c: any) => {
-            const id = isReal(c?.id) ? String(c.id).trim() : isReal(c?.ch_id) ? String(c.ch_id).trim() : "";
-            const name = isReal(c?.name) ? String(c.name).trim() : isReal(c?.title) ? String(c.title).trim() : "";
+          .map((c: unknown) => {
+            const cc = asObj(c) as StalkerChannelPayload;
+            const id = isReal(cc.id) ? String(cc.id).trim() : isReal(cc.ch_id) ? String(cc.ch_id).trim() : "";
+            const name = isReal(cc.name) ? String(cc.name).trim() : isReal(cc.title) ? String(cc.title).trim() : "";
             const logoRaw = pickLogo(c);
             const logo = logoRaw ? absolutizeMaybe(portalBase, logoRaw) : "";
             const out: StalkerChannel = { id, name };
@@ -233,8 +259,8 @@ export async function POST(req: Request) {
           })
           .filter((x: StalkerChannel) => x.id && x.name);
 
-        const totalItemsRaw = js?.total_items;
-        const perPageRaw = js?.max_page_items;
+        const totalItemsRaw = jsObj["total_items"];
+        const perPageRaw = jsObj["max_page_items"];
         const totalItems = isReal(totalItemsRaw) ? Number(String(totalItemsRaw)) : NaN;
         const perPage = isReal(perPageRaw) ? Number(String(perPageRaw)) : channels.length;
         if (Number.isFinite(totalItems) && totalItems >= 0 && Number.isFinite(perPage) && perPage > 0) {
@@ -256,8 +282,13 @@ export async function POST(req: Request) {
       page,
       hasMore,
     });
-  } catch (e: any) {
-    const msg = e?.name === "AbortError" ? "Request timed out. Try again." : (e?.message || "Unknown error.");
+  } catch (e: unknown) {
+    const msg =
+      typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError"
+        ? "Request timed out. Try again."
+        : e instanceof Error
+          ? e.message
+          : "Unknown error.";
     return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500 });
   }
 }

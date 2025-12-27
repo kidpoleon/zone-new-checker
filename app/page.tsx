@@ -7,7 +7,6 @@ import {
   normalizeStalkerUrl,
   normalizeUrl,
   parseXtreamFromUrlLine,
-  splitBulkLines,
 } from "@/lib/validation";
 
 type XtreamPlaylistCategory = { id: string; name: string };
@@ -81,6 +80,10 @@ function ResultKV({ label, value }: { label: string; value: string }) {
       <div className="v">{value || "N/A"}</div>
     </div>
   );
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : "Unknown error.";
 }
 
 export default function HomePage() {
@@ -366,8 +369,8 @@ export default function HomePage() {
           await loadXtreamChannels(last);
         }
       }
-    } catch (e: any) {
-      setPlaylistError(e?.message || "Unknown error.");
+    } catch (e: unknown) {
+      setPlaylistError(errMsg(e));
     } finally {
       setPlaylistBusy(false);
     }
@@ -400,8 +403,8 @@ export default function HomePage() {
         prefs.xtream[key] = { ...(prefs.xtream[key] || {}), lastCategoryId: categoryId };
         writePlaylistPrefs(prefs);
       }
-    } catch (e: any) {
-      setPlaylistError(e?.message || "Unknown error.");
+    } catch (e: unknown) {
+      setPlaylistError(errMsg(e));
     } finally {
       setPlaylistBusy(false);
     }
@@ -440,8 +443,8 @@ export default function HomePage() {
           await loadStalkerChannels(last, 0, false);
         }
       }
-    } catch (e: any) {
-      setPlaylistError(e?.message || "Unknown error.");
+    } catch (e: unknown) {
+      setPlaylistError(errMsg(e));
     } finally {
       setPlaylistBusy(false);
     }
@@ -478,8 +481,8 @@ export default function HomePage() {
           writePlaylistPrefs(prefs);
         }
       }
-    } catch (e: any) {
-      setPlaylistError(e?.message || "Unknown error.");
+    } catch (e: unknown) {
+      setPlaylistError(errMsg(e));
     } finally {
       setPlaylistBusy(false);
     }
@@ -489,8 +492,8 @@ export default function HomePage() {
     const errs: string[] = [];
     try {
       normalizeUrl(xtreamSingle.url);
-    } catch (e: any) {
-      errs.push(e?.message || "Invalid URL.");
+    } catch (e: unknown) {
+      errs.push(e instanceof Error ? e.message : "Invalid URL.");
     }
     if (!xtreamSingle.username.trim()) errs.push("Username is required.");
     if (!xtreamSingle.password.trim()) errs.push("Password is required.");
@@ -501,13 +504,13 @@ export default function HomePage() {
     const errs: string[] = [];
     try {
       normalizeStalkerUrl(stalkerSingle.url);
-    } catch (e: any) {
-      errs.push(e?.message || "Invalid URL.");
+    } catch (e: unknown) {
+      errs.push(e instanceof Error ? e.message : "Invalid URL.");
     }
     try {
       normalizeMac(stalkerSingle.mac);
-    } catch (e: any) {
-      errs.push(e?.message || "Invalid MAC.");
+    } catch (e: unknown) {
+      errs.push(e instanceof Error ? e.message : "Invalid MAC.");
     }
     return errs;
   }, [stalkerSingle.url, stalkerSingle.mac]);
@@ -554,8 +557,8 @@ export default function HomePage() {
     try {
       normalizeStalkerUrl(stalkerBulk.url);
       return "";
-    } catch (e: any) {
-      return e?.message || "Invalid URL.";
+    } catch (e: unknown) {
+      return e instanceof Error ? e.message : "Invalid URL.";
     }
   }, [stalkerBulk.url]);
 
@@ -633,8 +636,8 @@ export default function HomePage() {
 
         await loadStalkerGenres();
       }
-    } catch (e: any) {
-      setError(e?.message || "Unknown error.");
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -667,13 +670,13 @@ export default function HomePage() {
           try {
             const { url, username, password } = parseXtreamFromUrlLine(raw);
             parsed.push({ lineNumber, raw, url, username, password });
-          } catch (e: any) {
+          } catch (e: unknown) {
             preResults.push({
               lineNumber,
               input: raw,
               result: {
                 ok: false,
-                error: e?.message ? `Line ${lineNumber}: ${e.message}` : `Line ${lineNumber}: Invalid line`,
+                error: e instanceof Error ? `Line ${lineNumber}: ${e.message}` : `Line ${lineNumber}: Invalid line`,
                 expiryDate: "N/A",
                 maxConnections: "N/A",
                 realUrl: "N/A",
@@ -734,13 +737,13 @@ export default function HomePage() {
           try {
             const mac = normalizeMac(raw);
             parsed.push({ lineNumber, raw, mac });
-          } catch (e: any) {
+          } catch (e: unknown) {
             preResults.push({
               lineNumber,
               input: raw,
               result: {
                 ok: false,
-                error: e?.message ? `Line ${lineNumber}: ${e.message}` : `Line ${lineNumber}: Invalid MAC`,
+                error: e instanceof Error ? `Line ${lineNumber}: ${e.message}` : `Line ${lineNumber}: Invalid MAC`,
                 expiryDate: "N/A",
                 maxConnections: "N/A",
                 realUrl: "N/A",
@@ -793,11 +796,11 @@ export default function HomePage() {
           setBulkDone((d) => d + 1);
         });
       }
-    } catch (e: any) {
-      if (e?.name === "AbortError") {
+    } catch (e: unknown) {
+      if (typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError") {
         setError("Stopped.");
       } else {
-        setError(e?.message || "Unknown error.");
+        setError(errMsg(e));
       }
     } finally {
       setBusy(false);

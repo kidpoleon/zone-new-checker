@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeUrl } from "@/lib/validation";
 
+function asObj(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+}
+
 function absolutizeMaybe(urlOrigin: string, maybeUrl: string): string {
   // Xtream often returns relative logo URLs. We convert them to absolute URLs
   // so the frontend can proxy them consistently via /api/image.
@@ -37,6 +41,18 @@ type XtreamChannel = {
   name: string;
   logo?: string;
   categoryId?: string;
+};
+
+type XtreamCategoryPayload = {
+  category_id?: unknown;
+  category_name?: unknown;
+};
+
+type XtreamStreamPayload = {
+  stream_id?: unknown;
+  name?: unknown;
+  stream_icon?: unknown;
+  category_id?: unknown;
 };
 
 export async function POST(req: Request) {
@@ -89,14 +105,15 @@ export async function POST(req: Request) {
 
     const categoriesJson = await safeJson(categoriesRes);
     if (!Array.isArray(categoriesJson)) {
-      const msg = typeof categoriesJson?.message === "string" ? categoriesJson.message : "Invalid credentials or unsupported server.";
+      const msg = typeof asObj(categoriesJson)["message"] === "string" ? String(asObj(categoriesJson)["message"]) : "Invalid credentials or unsupported server.";
       return NextResponse.json({ requestId, ok: false, error: msg }, { status: 401 });
     }
 
     const categories: XtreamCategory[] = categoriesJson
-      .map((c: any) => {
-        const id = typeof c?.category_id === "string" || typeof c?.category_id === "number" ? String(c.category_id) : "";
-        const name = typeof c?.category_name === "string" ? c.category_name : "";
+      .map((c: unknown) => {
+        const o = asObj(c) as XtreamCategoryPayload;
+        const id = typeof o.category_id === "string" || typeof o.category_id === "number" ? String(o.category_id) : "";
+        const name = typeof o.category_name === "string" ? o.category_name : "";
         return { id: id.trim(), name: name.trim() };
       })
       .filter((c: XtreamCategory) => c.id && c.name);
@@ -130,12 +147,13 @@ export async function POST(req: Request) {
       const streamsJson = await safeJson(streamsRes);
       if (Array.isArray(streamsJson)) {
         channels = streamsJson
-          .map((s: any) => {
-            const id = typeof s?.stream_id === "string" || typeof s?.stream_id === "number" ? String(s.stream_id).trim() : "";
-            const name = typeof s?.name === "string" ? s.name.trim() : "";
-            const logoRaw = typeof s?.stream_icon === "string" ? s.stream_icon.trim() : "";
+          .map((s: unknown) => {
+            const o = asObj(s) as XtreamStreamPayload;
+            const id = typeof o.stream_id === "string" || typeof o.stream_id === "number" ? String(o.stream_id).trim() : "";
+            const name = typeof o.name === "string" ? o.name.trim() : "";
+            const logoRaw = typeof o.stream_icon === "string" ? o.stream_icon.trim() : "";
             const logo = logoRaw ? absolutizeMaybe(url, logoRaw) : "";
-            const cat = typeof s?.category_id === "string" || typeof s?.category_id === "number" ? String(s.category_id).trim() : "";
+            const cat = typeof o.category_id === "string" || typeof o.category_id === "number" ? String(o.category_id).trim() : "";
             const out: XtreamChannel = { id, name };
             if (logo) out.logo = logo;
             if (cat) out.categoryId = cat;
@@ -151,8 +169,13 @@ export async function POST(req: Request) {
       categories,
       channels,
     });
-  } catch (e: any) {
-    const msg = e?.name === "AbortError" ? "Request timed out. Try again." : (e?.message || "Unknown error.");
+  } catch (e: unknown) {
+    const msg =
+      typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError"
+        ? "Request timed out. Try again."
+        : e instanceof Error
+          ? e.message
+          : "Unknown error.";
     return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500 });
   }
 }

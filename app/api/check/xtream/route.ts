@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeUrl, parsePortFromOrigin } from "@/lib/validation";
 
+function asObj(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+}
+
 function formatExpiry(exp: unknown): string {
   // Xtream typically returns expiry as epoch seconds (`exp_date`).
   // We normalize it to a stable YYYY-MM-DD string for UI display.
@@ -67,20 +71,21 @@ export async function POST(req: Request) {
     }
 
     const json = await safeJson(res);
-    const userInfo = json?.user_info;
-    const serverInfo = json?.server_info;
+    const jsonObj = asObj(json);
+    const userInfo = asObj(jsonObj["user_info"]);
+    const serverInfo = asObj(jsonObj["server_info"]);
 
-    if (!userInfo || typeof userInfo !== "object") {
-      const msg = typeof json?.message === "string" ? json.message : "Invalid credentials or unsupported server.";
+    if (Object.keys(userInfo).length === 0) {
+      const msg = typeof jsonObj["message"] === "string" ? String(jsonObj["message"]) : "Invalid credentials or unsupported server.";
       return NextResponse.json({ requestId, ok: false, error: msg }, { status: 401 });
     }
 
-    const expiryDate = formatExpiry(userInfo?.exp_date);
-    const maxConnections = String(userInfo?.max_connections ?? "N/A");
+    const expiryDate = formatExpiry(userInfo["exp_date"]);
+    const maxConnections = String(userInfo["max_connections"] ?? "N/A");
 
-    const serverUrl = String(serverInfo?.url ?? "").trim();
-    const serverPort = String(serverInfo?.port ?? "").trim();
-    const timezone = String(serverInfo?.timezone ?? "N/A");
+    const serverUrl = String(serverInfo["url"] ?? "").trim();
+    const serverPort = String(serverInfo["port"] ?? "").trim();
+    const timezone = String(serverInfo["timezone"] ?? "N/A");
 
     const realUrl = serverUrl ? serverUrl : url.replace(/^https?:\/\//i, "");
     const port = serverPort ? serverPort : parsePortFromOrigin(url);
@@ -94,8 +99,13 @@ export async function POST(req: Request) {
       port,
       timezone,
     });
-  } catch (e: any) {
-    const msg = e?.name === "AbortError" ? "Request timed out. Try again." : (e?.message || "Unknown error.");
+  } catch (e: unknown) {
+    const msg =
+      typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError"
+        ? "Request timed out. Try again."
+        : e instanceof Error
+          ? e.message
+          : "Unknown error.";
     return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500 });
   }
 }

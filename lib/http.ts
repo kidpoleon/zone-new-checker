@@ -14,7 +14,7 @@ export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestIn
   }
 }
 
-export async function safeJson(res: Response): Promise<any> {
+export async function safeJson(res: Response): Promise<unknown> {
   // Some IPTV portals return HTML error pages while still responding with HTTP 200.
   // We surface a short snippet to make debugging easier.
   const text = await res.text();

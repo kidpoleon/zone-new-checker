@@ -6,7 +6,11 @@ import { lookup } from "dns/promises";
 // This route uses Node-only APIs (dns/promises), so it must not run in the Edge runtime.
 export const runtime = "nodejs";
 
-function isReal(v: any): boolean {
+function asObj(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+}
+
+function isReal(v: unknown): boolean {
   // Stalker portals frequently return placeholder values like "0", "null", or "0000-00-00 00:00:00".
   // This helper filters those out so our pickers don't show garbage in the UI.
   if (v === null || v === undefined) return false;
@@ -65,19 +69,21 @@ function formatMysqlDateTime(v: string): string {
   });
 }
 
-function pickExpiry(jsAccount: any, jsProfile: any): string {
+function pickExpiry(jsAccount: unknown, jsProfile: unknown): string {
   // Stalker portals are inconsistent: expiry may be epoch seconds, MySQL datetime,
   // or even shoved into unrelated fields (e.g. `phone`). We scan common candidates.
+  const a = asObj(jsAccount);
+  const p = asObj(jsProfile);
   const candidates = [
-    jsAccount?.expire_billing_date,
-    jsProfile?.expire_billing_date,
+    a["expire_billing_date"],
+    p["expire_billing_date"],
     // Some portals abuse `phone` to store expiry (MacAttack reads this)
-    jsAccount?.phone,
-    jsProfile?.phone,
-    jsAccount?.expire_date,
-    jsProfile?.expire_date,
-    jsAccount?.exp_date,
-    jsProfile?.exp_date,
+    a["phone"],
+    p["phone"],
+    a["expire_date"],
+    p["expire_date"],
+    a["exp_date"],
+    p["exp_date"],
   ];
 
   for (const c of candidates) {
@@ -94,14 +100,15 @@ function pickExpiry(jsAccount: any, jsProfile: any): string {
   return "N/A";
 }
 
-function pickChannelCount(payload: any): string | null {
-  const js = payload?.js;
+function pickChannelCount(payload: unknown): string | null {
+  const js = asObj(payload)["js"];
   if (Array.isArray(js)) return String(js.length);
 
-  const data = js?.data;
+  const jsObj = asObj(js);
+  const data = jsObj["data"];
   if (Array.isArray(data)) {
     // Some portals also provide total_items; prefer it when valid.
-    const totalItems = js?.total_items;
+    const totalItems = jsObj["total_items"];
     if (isReal(totalItems)) {
       const n = Number(String(totalItems));
       if (Number.isFinite(n) && n >= 0) return String(n);
@@ -109,7 +116,7 @@ function pickChannelCount(payload: any): string | null {
     return String(data.length);
   }
 
-  const totalItems = js?.total_items;
+  const totalItems = jsObj["total_items"];
   if (isReal(totalItems)) {
     const n = Number(String(totalItems));
     if (Number.isFinite(n) && n >= 0) return String(n);
@@ -118,12 +125,14 @@ function pickChannelCount(payload: any): string | null {
   return null;
 }
 
-function pickMaxOnline(jsAccount: any, jsProfile: any): string {
-  const storages = jsAccount?.storages ?? jsProfile?.storages;
+function pickMaxOnline(jsAccount: unknown, jsProfile: unknown): string {
+  const a = asObj(jsAccount);
+  const p = asObj(jsProfile);
+  const storages = a["storages"] ?? p["storages"];
   if (storages && typeof storages === "object") {
     const nums: number[] = [];
     for (const key of Object.keys(storages)) {
-      const v = storages?.[key]?.max_online;
+      const v = asObj(asObj(storages)[key])["max_online"];
       if (isReal(v)) {
         const n = Number(String(v));
         if (Number.isFinite(n)) nums.push(n);
@@ -132,7 +141,7 @@ function pickMaxOnline(jsAccount: any, jsProfile: any): string {
     if (nums.length > 0) return String(Math.max(...nums));
   }
 
-  const v = jsAccount?.max_online ?? jsProfile?.max_online;
+  const v = a["max_online"] ?? p["max_online"];
   if (isReal(v)) return String(v);
   return "N/A";
 }
@@ -160,7 +169,7 @@ async function tryPortalPhp(baseUrl: string, mac: string) {
 
   if (!res.ok) throw new Error(`Handshake failed (HTTP ${res.status}).`);
   const j = await safeJson(res);
-  const token = j?.js?.token;
+  const token = asObj(asObj(j)["js"])["token"];
   if (!isReal(token)) throw new Error("Handshake did not return a token.");
 
   const authedCookies = {
@@ -220,7 +229,7 @@ async function tryStalkerPortalLoadPhp(baseUrl: string, mac: string) {
 
   if (!res.ok) throw new Error(`Handshake failed (HTTP ${res.status}).`);
   const j = await safeJson(res);
-  const token = j?.js?.token;
+  const token = asObj(asObj(j)["js"])["token"];
   if (!isReal(token)) throw new Error("Handshake did not return a token.");
 
   const authedCookies = { ...cookies, token: String(token) };
@@ -268,8 +277,8 @@ export async function POST(req: Request) {
     const origin = new URL(portalBase).origin;
     const mac = normalizeMac(body?.mac);
 
-    let profileJson: any = {};
-    let accountJson: any = {};
+    let profileJson: unknown = {};
+    let accountJson: unknown = {};
     let timezone = "Europe/London";
     let token = "";
     let cookiesForFollowups: Record<string, string> | null = null;
@@ -295,8 +304,8 @@ export async function POST(req: Request) {
       headersForFollowups = r.headers;
     }
 
-    const jsProfile = profileJson?.js ?? {};
-    const jsAccount = accountJson?.js ?? {};
+    const jsProfile = asObj(profileJson)["js"];
+    const jsAccount = asObj(accountJson)["js"];
 
     const expiryDate = pickExpiry(jsAccount, jsProfile);
     const maxConnections = pickMaxOnline(jsAccount, jsProfile);
@@ -362,8 +371,13 @@ export async function POST(req: Request) {
       portalIp,
       channels,
     });
-  } catch (e: any) {
-    const msg = e?.name === "AbortError" ? "Request timed out. Try again." : (e?.message || "Unknown error.");
+  } catch (e: unknown) {
+    const msg =
+      typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError"
+        ? "Request timed out. Try again."
+        : e instanceof Error
+          ? e.message
+          : "Unknown error.";
     return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500 });
   }
 }

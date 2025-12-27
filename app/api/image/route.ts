@@ -61,8 +61,13 @@ export async function GET(req: Request) {
         "Cache-Control": "public, max-age=86400",
       },
     });
-  } catch (e: any) {
-    const msg = e?.name === "AbortError" ? "Request timed out." : (e?.message || "Unknown error.");
+  } catch (e: unknown) {
+    const msg =
+      typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError"
+        ? "Request timed out."
+        : e instanceof Error
+          ? e.message
+          : "Unknown error.";
     return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500 });
   }
 }
