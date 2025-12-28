@@ -6,6 +6,7 @@ export type CheckResult = {
   error?: string;
 
   expiryDate: string; // display-ready
+  expiryTs?: number; // unix ms for sorting (optional)
   maxConnections: string; // display-ready
   realUrl: string;
   port: string;

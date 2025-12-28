@@ -55,6 +55,32 @@ function formatEpoch(v: string): string {
   });
 }
 
+function expiryTsFromEpoch(v: string): number | null {
+  const s = String(v).trim();
+  if (!/^[0-9]{9,13}$/.test(s)) return null;
+  let n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  if (s.length >= 13) n = Math.floor(n / 1000);
+  if (n <= 0) return null;
+  const t = n * 1000;
+  return Number.isFinite(t) ? t : null;
+}
+
+function expiryTsFromMysqlDateTime(v: string): number | null {
+  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})\s+([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?$/.exec(v);
+  if (!m) return null;
+  if (m[1] === "0000") return null;
+  const yyyy = Number(m[1]);
+  const mm = Number(m[2]);
+  const dd = Number(m[3]);
+  const hh = Number(m[4]);
+  const mi = Number(m[5]);
+  const ss = Number(m[6] || "0");
+  if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd) || !Number.isFinite(hh) || !Number.isFinite(mi) || !Number.isFinite(ss)) return null;
+  const t = Date.UTC(yyyy, mm - 1, dd, hh, mi, ss);
+  return Number.isFinite(t) ? t : null;
+}
+
 function formatMysqlDateTime(v: string): string {
   // Input commonly: "YYYY-MM-DD HH:MM:SS". If invalid, return original.
   const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})\s+([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?$/.exec(v);
@@ -110,6 +136,41 @@ function pickExpiry(jsAccount: unknown, jsProfile: unknown): string {
     }
   }
   return "N/A";
+}
+
+function pickExpiryInfo(jsAccount: unknown, jsProfile: unknown): { expiryDate: string; expiryTs?: number } {
+  const a = asObj(jsAccount);
+  const p = asObj(jsProfile);
+  const candidates = [
+    a["expire_billing_date"],
+    p["expire_billing_date"],
+    a["phone"],
+    p["phone"],
+    a["expire_date"],
+    p["expire_date"],
+    a["exp_date"],
+    p["exp_date"],
+  ];
+
+  for (const c of candidates) {
+    if (!isReal(c)) continue;
+    const raw = String(c).trim();
+
+    const tsEpoch = expiryTsFromEpoch(raw);
+    if (tsEpoch !== null) {
+      return { expiryDate: formatEpoch(raw), expiryTs: tsEpoch };
+    }
+
+    const tsMysql = expiryTsFromMysqlDateTime(raw);
+    if (tsMysql !== null) {
+      return { expiryDate: formatMysqlDateTime(raw), expiryTs: tsMysql };
+    }
+
+    // Unknown format: keep display value; sorting will fall back to client parsing.
+    return { expiryDate: raw };
+  }
+
+  return { expiryDate: "N/A" };
 }
 
 function pickChannelCount(payload: unknown): string | null {
@@ -329,7 +390,8 @@ export async function POST(req: Request) {
     const jsProfile = asObj(profileJson)["js"];
     const jsAccount = asObj(accountJson)["js"];
 
-    const expiryDate = pickExpiry(jsAccount, jsProfile);
+    const expiry = pickExpiryInfo(jsAccount, jsProfile);
+    const expiryDate = expiry.expiryDate;
     const maxConnections = pickMaxOnline(jsAccount, jsProfile);
 
     // You asked for PORTAL URL as REAL URL
@@ -387,6 +449,7 @@ export async function POST(req: Request) {
         requestId,
         ok: true,
         expiryDate,
+        expiryTs: typeof expiry.expiryTs === "number" ? expiry.expiryTs : undefined,
         maxConnections,
         realUrl,
         port,

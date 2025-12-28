@@ -324,8 +324,8 @@ export default function HomePage() {
         const c = am.localeCompare(bm);
         if (c !== 0) return c * dir;
       } else if (bulkSortKey === "expiry") {
-        const at = parseExpiryTs(a.result.expiryDate);
-        const bt = parseExpiryTs(b.result.expiryDate);
+        const at = typeof a.result.expiryTs === "number" && Number.isFinite(a.result.expiryTs) ? a.result.expiryTs : parseExpiryTs(a.result.expiryDate);
+        const bt = typeof b.result.expiryTs === "number" && Number.isFinite(b.result.expiryTs) ? b.result.expiryTs : parseExpiryTs(b.result.expiryDate);
         if (at !== bt) return (at - bt) * dir;
       } else if (bulkSortKey === "maxConnections") {
         const at = parseIntSafe(a.result.maxConnections);
@@ -748,6 +748,7 @@ export default function HomePage() {
         setSingleResult({
           ok: true,
           expiryDate: json.expiryDate,
+          expiryTs: typeof json.expiryTs === "number" ? json.expiryTs : undefined,
           maxConnections: String(json.maxConnections ?? "N/A"),
           realUrl: String(json.realUrl ?? "N/A"),
           port: String(json.port ?? "N/A"),
@@ -770,6 +771,7 @@ export default function HomePage() {
         setSingleResult({
           ok: true,
           expiryDate: String(json.expiryDate ?? "N/A"),
+          expiryTs: typeof json.expiryTs === "number" ? json.expiryTs : undefined,
           maxConnections: String(json.maxConnections ?? "N/A"),
           realUrl: String(json.realUrl ?? "N/A"),
           port: String(json.port ?? "N/A"),
@@ -882,6 +884,7 @@ export default function HomePage() {
                 result: {
                   ok: true,
                   expiryDate: String(jsonObj["expiryDate"] ?? "N/A"),
+                  expiryTs: typeof jsonObj["expiryTs"] === "number" ? (jsonObj["expiryTs"] as number) : undefined,
                   maxConnections: String(jsonObj["maxConnections"] ?? "N/A"),
                   realUrl: String(jsonObj["realUrl"] ?? "N/A"),
                   port: String(jsonObj["port"] ?? "N/A"),
@@ -908,6 +911,7 @@ export default function HomePage() {
                   ok: false,
                   error: msg,
                   expiryDate: "N/A",
+                  expiryTs: undefined,
                   maxConnections: "N/A",
                   realUrl: "N/A",
                   port: "N/A",
@@ -940,6 +944,7 @@ export default function HomePage() {
                 ok: false,
                 error: e instanceof Error ? `Line ${lineNumber}: ${e.message}` : `Line ${lineNumber}: Invalid MAC`,
                 expiryDate: "N/A",
+                expiryTs: undefined,
                 maxConnections: "N/A",
                 realUrl: "N/A",
                 port: "N/A",
@@ -984,6 +989,7 @@ export default function HomePage() {
                     ok: false,
                     error: err,
                     expiryDate: "N/A",
+                    expiryTs: undefined,
                     maxConnections: "N/A",
                     realUrl: "N/A",
                     port: "N/A",
@@ -1003,6 +1009,7 @@ export default function HomePage() {
                 result: {
                   ok: true,
                   expiryDate: String(jsonObj["expiryDate"] ?? "N/A"),
+                  expiryTs: typeof jsonObj["expiryTs"] === "number" ? (jsonObj["expiryTs"] as number) : undefined,
                   maxConnections: String(jsonObj["maxConnections"] ?? "N/A"),
                   realUrl: String(jsonObj["realUrl"] ?? "N/A"),
                   port: String(jsonObj["port"] ?? "N/A"),
