@@ -44,6 +44,11 @@ export async function POST(req: Request) {
     const blocked = requireClient(req);
     if (blocked) return blocked;
 
+    const ct = (req.headers.get("content-type") || "").toLowerCase();
+    if (!ct.includes("application/json")) {
+      return NextResponse.json({ requestId, ok: false, error: "Unsupported content type." }, { status: 415, headers: NO_STORE_HEADERS });
+    }
+
     // Validate credentials via player_api.php (Xtream Codes API).
     // We keep strict timeouts to avoid long-running serverless executions.
     const body = await req.json();

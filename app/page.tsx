@@ -70,8 +70,9 @@ type BulkSortKey = "input" | "status" | "expiry" | "maxConnections" | "timezone"
 type BulkSortDir = "asc" | "desc";
 type BulkSortState = { key: BulkSortKey; dir: BulkSortDir } | null;
 
-const LS_KEY = "iptv_checker_v1";
-const LS_PLAYLIST_PREFS = "iptv_checker_v1_playlist_prefs";
+const LS_KEY_V2 = "iptv_checker_v2";
+const LS_KEY_V1 = "iptv_checker_v1";
+const LS_PLAYLIST_PREFS = "iptv_checker_v2_playlist_prefs";
 
 function emptyResult(): CheckResult {
   return { ok: false, error: "", expiryDate: "", maxConnections: "", realUrl: "", port: "", timezone: "" };
@@ -149,7 +150,9 @@ export default function HomePage() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(LS_KEY);
+      const rawV2 = localStorage.getItem(LS_KEY_V2);
+      const rawV1 = rawV2 ? null : localStorage.getItem(LS_KEY_V1);
+      const raw = rawV2 || rawV1;
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (parsed?.mode) setMode(parsed.mode);
@@ -160,6 +163,15 @@ export default function HomePage() {
       if (parsed?.stalkerBulk) setStalkerBulk(parsed.stalkerBulk);
       if (parsed?.singleResult) setSingleResult(parsed.singleResult);
       if (parsed?.bulkResults) setBulkResults(parsed.bulkResults);
+
+      // Best-effort migration: if we loaded v1, immediately save into v2.
+      if (rawV1) {
+        try {
+          localStorage.setItem(LS_KEY_V2, JSON.stringify(parsed));
+        } catch {
+          // ignore
+        }
+      }
     } catch {
       // Ignore corrupt storage
     }
@@ -168,7 +180,7 @@ export default function HomePage() {
   function logoSrc(logo?: string): string {
     const raw = (logo || "").trim();
     if (!raw) return "";
-    return `/api/image?url=${encodeURIComponent(raw)}`;
+    return `/api/image?client=1&url=${encodeURIComponent(raw)}`;
   }
 
   function clearResults() {
@@ -218,7 +230,7 @@ export default function HomePage() {
       bulkResults,
     };
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify(payload));
+      localStorage.setItem(LS_KEY_V2, JSON.stringify(payload));
     } catch {
       // storage may be blocked
     }
@@ -412,7 +424,7 @@ export default function HomePage() {
 
   function readPlaylistPrefs(): PlaylistPrefs {
     // Separate localStorage key to remember last selected category/genre per server.
-    // This is intentionally separate from the main LS_KEY so resets are predictable.
+    // This is intentionally separate from the main LS_KEY_V2 so resets are predictable.
     try {
       const raw = localStorage.getItem(LS_PLAYLIST_PREFS);
       if (!raw) return { xtream: {}, stalker: {} };
@@ -812,18 +824,24 @@ export default function HomePage() {
 
       if (mode === "xtream") {
         const rawLines = (xtreamBulk.lines || "").split(/\r?\n/);
-        const parsed: { lineNumber: number; raw: string; url: string; username: string; password: string }[] = [];
-        const preResults: BulkRowResult[] = [];
+        const parsed: { lineNumber: number; raw: string; url: string; username: string; password: string; rowIndex: number }[] = [];
+        const outRows: BulkRowResult[] = [];
 
         for (let i = 0; i < rawLines.length; i++) {
           const raw = rawLines[i].trim();
           if (!raw) continue;
           const lineNumber = i + 1;
+          const rowIndex = outRows.length;
           try {
             const { url, username, password } = parseXtreamFromUrlLine(raw);
-            parsed.push({ lineNumber, raw, url, username, password });
+            parsed.push({ lineNumber, raw, url, username, password, rowIndex });
+            outRows.push({
+              lineNumber,
+              input: raw,
+              result: { ok: false, error: "Checking...", expiryDate: "N/A", maxConnections: "N/A", realUrl: "N/A", port: "N/A", timezone: "N/A" },
+            });
           } catch (e: unknown) {
-            preResults.push({
+            outRows.push({
               lineNumber,
               input: raw,
               result: {
@@ -839,15 +857,15 @@ export default function HomePage() {
           }
         }
 
-        if (parsed.length === 0 && preResults.length === 0) {
+        if (parsed.length === 0 && outRows.length === 0) {
           throw new Error("Bulk input is empty.");
         }
-        if (parsed.length + preResults.length > 50) {
+        if (outRows.length > 50) {
           throw new Error("Too many lines. Max allowed: 50.");
         }
 
         setBulkTotal(parsed.length);
-        setBulkResults(preResults);
+        setBulkResults(outRows);
 
         await runPool(parsed, CONCURRENCY, async (item: (typeof parsed)[number]) => {
           if (signal.aborted) return;
@@ -865,26 +883,30 @@ export default function HomePage() {
 
             if (!res.ok || jsonObj["ok"] !== true) {
               const err = typeof jsonObj["error"] === "string" ? String(jsonObj["error"]) : "Check failed.";
-              setBulkResults((prev) =>
-                prev.concat({
+              setBulkResults((prev) => {
+                const next = prev.slice();
+                next[item.rowIndex] = {
                   lineNumber: item.lineNumber,
                   input: item.raw,
                   result: {
                     ok: false,
                     error: err,
                     expiryDate: "N/A",
+                    expiryTs: undefined,
                     maxConnections: "N/A",
                     realUrl: "N/A",
                     port: "N/A",
                     timezone: "N/A",
                   },
-                })
-              );
+                };
+                return next;
+              });
               return;
             }
 
-            setBulkResults((prev) =>
-              prev.concat({
+            setBulkResults((prev) => {
+              const next = prev.slice();
+              next[item.rowIndex] = {
                 lineNumber: item.lineNumber,
                 input: item.raw,
                 result: {
@@ -896,8 +918,9 @@ export default function HomePage() {
                   port: String(jsonObj["port"] ?? "N/A"),
                   timezone: String(jsonObj["timezone"] ?? "N/A"),
                 },
-              })
-            );
+              };
+              return next;
+            });
           } catch (e: unknown) {
             if (
               typeof e === "object" &&
@@ -909,8 +932,9 @@ export default function HomePage() {
             }
 
             const msg = errMsg(e);
-            setBulkResults((prev) =>
-              prev.concat({
+            setBulkResults((prev) => {
+              const next = prev.slice();
+              next[item.rowIndex] = {
                 lineNumber: item.lineNumber,
                 input: item.raw,
                 result: {
@@ -923,8 +947,9 @@ export default function HomePage() {
                   port: "N/A",
                   timezone: "N/A",
                 },
-              })
-            );
+              };
+              return next;
+            });
           } finally {
             if (!signal.aborted) setBulkDone((d) => d + 1);
           }
@@ -932,18 +957,35 @@ export default function HomePage() {
       } else {
         const url = normalizeStalkerUrl(stalkerBulk.url);
         const rawLines = (stalkerBulk.macs || "").split(/\r?\n/);
-        const parsed: { lineNumber: number; raw: string; mac: string }[] = [];
-        const preResults: BulkRowResult[] = [];
+        const parsed: { lineNumber: number; raw: string; mac: string; rowIndex: number }[] = [];
+        const outRows: BulkRowResult[] = [];
 
         for (let i = 0; i < rawLines.length; i++) {
           const raw = rawLines[i].trim();
           if (!raw) continue;
           const lineNumber = i + 1;
+          const rowIndex = outRows.length;
           try {
             const mac = normalizeMac(raw);
-            parsed.push({ lineNumber, raw, mac });
+            parsed.push({ lineNumber, raw, mac, rowIndex });
+            outRows.push({
+              lineNumber,
+              input: mac,
+              result: {
+                ok: false,
+                error: "Checking...",
+                expiryDate: "N/A",
+                expiryTs: undefined,
+                maxConnections: "N/A",
+                realUrl: "N/A",
+                port: "N/A",
+                timezone: "N/A",
+                portalIp: "N/A",
+                channels: "N/A",
+              },
+            });
           } catch (e: unknown) {
-            preResults.push({
+            outRows.push({
               lineNumber,
               input: raw,
               result: {
@@ -962,15 +1004,15 @@ export default function HomePage() {
           }
         }
 
-        if (parsed.length === 0 && preResults.length === 0) {
+        if (parsed.length === 0 && outRows.length === 0) {
           throw new Error("Bulk input is empty.");
         }
-        if (parsed.length + preResults.length > 50) {
+        if (outRows.length > 50) {
           throw new Error("Too many lines. Max allowed: 50.");
         }
 
         setBulkTotal(parsed.length);
-        setBulkResults(preResults);
+        setBulkResults(outRows);
 
         await runPool(parsed, CONCURRENCY, async (item: (typeof parsed)[number]) => {
           if (signal.aborted) return;
@@ -987,8 +1029,9 @@ export default function HomePage() {
 
             if (!res.ok || jsonObj["ok"] !== true) {
               const err = typeof jsonObj["error"] === "string" ? String(jsonObj["error"]) : "Check failed.";
-              setBulkResults((prev) =>
-                prev.concat({
+              setBulkResults((prev) => {
+                const next = prev.slice();
+                next[item.rowIndex] = {
                   lineNumber: item.lineNumber,
                   input: item.mac,
                   result: {
@@ -1003,13 +1046,15 @@ export default function HomePage() {
                     portalIp: "N/A",
                     channels: "N/A",
                   },
-                })
-              );
+                };
+                return next;
+              });
               return;
             }
 
-            setBulkResults((prev) =>
-              prev.concat({
+            setBulkResults((prev) => {
+              const next = prev.slice();
+              next[item.rowIndex] = {
                 lineNumber: item.lineNumber,
                 input: item.mac,
                 result: {
@@ -1023,8 +1068,9 @@ export default function HomePage() {
                   portalIp: String(jsonObj["portalIp"] ?? "N/A"),
                   channels: String(jsonObj["channels"] ?? "N/A"),
                 },
-              })
-            );
+              };
+              return next;
+            });
           } catch (e: unknown) {
             if (
               typeof e === "object" &&
@@ -1036,14 +1082,16 @@ export default function HomePage() {
             }
 
             const msg = errMsg(e);
-            setBulkResults((prev) =>
-              prev.concat({
+            setBulkResults((prev) => {
+              const next = prev.slice();
+              next[item.rowIndex] = {
                 lineNumber: item.lineNumber,
                 input: item.mac,
                 result: {
                   ok: false,
                   error: msg,
                   expiryDate: "N/A",
+                  expiryTs: undefined,
                   maxConnections: "N/A",
                   realUrl: "N/A",
                   port: "N/A",
@@ -1051,8 +1099,9 @@ export default function HomePage() {
                   portalIp: "N/A",
                   channels: "N/A",
                 },
-              })
-            );
+              };
+              return next;
+            });
           } finally {
             if (!signal.aborted) setBulkDone((d) => d + 1);
           }
@@ -1082,7 +1131,8 @@ export default function HomePage() {
     setXtreamBulk({ lines: "" });
     setStalkerBulk({ url: "", macs: "" });
     try {
-      localStorage.removeItem(LS_KEY);
+      localStorage.removeItem(LS_KEY_V2);
+      localStorage.removeItem(LS_KEY_V1);
     } catch {
       // ignore
     }
@@ -1611,7 +1661,7 @@ export default function HomePage() {
               </thead>
               <tbody>
                 {sortedBulkResults.map((r, idx) => (
-                  <tr key={idx}>
+                  <tr key={`${r.lineNumber ?? idx}-${r.input}`}>
                     <td className="cellInput mono" title={r.input}>
                       <span className="cellTrunc">{r.input}</span>
                     </td>
