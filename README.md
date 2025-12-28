@@ -11,6 +11,7 @@ You can run **Single** checks or **Bulk** checks, and (in Single mode) browse a 
 - [What this does](#what-this-does)
 - [What it does NOT do](#what-it-does-not-do)
 - [Features](#features)
+- [Project docs](#project-docs)
 - [Quick start (Windows, ELI5)](#quick-start-windows-eli5)
 - [Deploy to Vercel (recommended)](#deploy-to-vercel-recommended)
 - [Run with Docker Compose](#run-with-docker-compose)
@@ -78,6 +79,14 @@ Displayed fields (depending on protocol):
 
 ---
 
+## Project docs
+
+- [License](./LICENSE)
+- [Changelog](./CHANGELOG.md)
+- [Contributing](./CONTRIBUTING.md)
+- [Security policy](./SECURITY.md)
+- [Code of conduct](./CODE_OF_CONDUCT.md)
+
 ## Quick start (Windows, ELI5)
 
 ### 1) Install Node.js
@@ -135,6 +144,50 @@ Checklist:
 - Push to Git
 - Import the repo in Vercel
 - Deploy
+
+### Enable Vercel Analytics + Speed Insights (recommended)
+
+In your Vercel project dashboard:
+
+- Enable **Web Analytics** (Analytics tab)
+- Enable **Speed Insights** (Speed Insights tab)
+
+This repo includes the required components in `app/layout.tsx`:
+
+- `@vercel/analytics` (`<Analytics />`)
+- `@vercel/speed-insights` (`<SpeedInsights />`)
+
+After deploying, you should see requests/scripts under:
+
+- `/_vercel/insights/*`
+- `/_vercel/speed-insights/*`
+
+### Vercel production hardening checklist (WAF/rate-limit/caching)
+
+These are *recommended* if you deploy publicly.
+
+- **WAF / rate limiting**
+  - Enable Vercel WAF on the project
+  - Add per-IP + per-path rules for:
+    - `/api/check/*`
+    - `/api/playlist/*`
+    - `/api/image`
+- **Bot protection**
+  - If available on your plan, enable bot protection / managed rules for:
+    - `/api/check/*`
+    - `/api/playlist/*`
+- **Caching rules**
+  - Credential endpoints must never be cached
+    - Confirm `Cache-Control: no-store` on `/api/check/*` and `/api/playlist/*`
+  - `/api/image` can be cached
+    - Success: `Cache-Control: public, max-age=86400`
+    - Errors: `Cache-Control: no-store`
+- **Observability**
+  - Monitor:
+    - 429 rate-limit responses
+    - upstream 502s
+    - timeout errors
+  - If you see timeouts, reduce client concurrency and/or upstream timeouts
 
 ---
 
