@@ -13,6 +13,7 @@ You can run **Single** checks or **Bulk** checks, and (in Single mode) browse a 
 - [Features](#features)
 - [Quick start (Windows, ELI5)](#quick-start-windows-eli5)
 - [Deploy to Vercel (recommended)](#deploy-to-vercel-recommended)
+- [Run with Docker Compose](#run-with-docker-compose)
 - [Project structure](#project-structure)
 - [API routes (server)](#api-routes-server)
 - [Security + privacy notes](#security--privacy-notes)
@@ -46,6 +47,7 @@ Displayed fields (depending on protocol):
 - No streaming.
 - No M3U exporting.
 - No storing credentials server-side.
+- No scraping or collecting your credentials.
 
 ---
 
@@ -127,6 +129,55 @@ High-level idea:
 
 No environment variables are required.
 
+Checklist:
+
+- Make sure the repo builds locally: `npm run build`
+- Push to Git
+- Import the repo in Vercel
+- Deploy
+
+---
+
+## Run with Docker Compose
+
+This is the easiest way to self-host on your own PC/VPS.
+
+No environment variables are required.
+
+### Requirements
+
+- Docker Desktop (Windows/Mac) or Docker Engine (Linux)
+- Docker Compose v2
+
+If you are on Windows, install Docker Desktop and enable WSL2.
+
+### Start (production)
+
+In the project folder:
+
+```bash
+docker compose up -d --build
+```
+
+Then open:
+
+- http://localhost:3000
+
+If port 3000 is already used on your machine, stop the other app or change the port mapping in `docker-compose.yml`.
+
+### Stop
+
+```bash
+docker compose down
+```
+
+### Update to latest code
+
+```bash
+git pull
+docker compose up -d --build
+```
+
 ---
 
 ## Project structure
@@ -198,6 +249,10 @@ Logo proxy:
 - forwards an image response
 - adds caching headers (`Cache-Control: public, max-age=86400`)
 
+Note:
+
+- The UI calls `/api/image?client=1&url=...`.
+
 ---
 
 ## Security + privacy notes
@@ -205,6 +260,11 @@ Logo proxy:
 - This project stores your latest inputs/results in **your browser** via `localStorage`.
 - The serverless API routes must forward credentials to IPTV portals (by design) to validate.
 - No database is used.
+
+Plain English:
+
+- Your credentials are not scraped/collected.
+- Your credentials are only sent to the IPTV server you typed in (because that's the only way to validate them).
 
 If you want maximum privacy:
 
@@ -221,6 +281,31 @@ If you want maximum privacy:
 - Portals can be slow or return non-JSON HTML.
 
 This app uses strict timeouts to avoid hanging.
+
+### Docker Compose troubleshooting
+
+#### Port 3000 already in use
+
+- Stop the other program using port 3000, OR
+- Change the port mapping in `docker-compose.yml` (example: `"8080:3000"`) and open `http://localhost:8080`.
+
+#### Build fails / takes too long
+
+- First time build can be slow (it installs dependencies and runs `next build`).
+- If it fails, try rebuilding from scratch:
+
+```bash
+docker compose down
+docker compose build --no-cache
+docker compose up -d
+```
+
+#### How do I confirm it’s running?
+
+```bash
+docker compose ps
+docker compose logs -f
+```
 
 ### Lint/build errors
 
