@@ -267,6 +267,12 @@ export default function HomePage() {
         }
       }
 
+      // Browser-native parsing fallback (covers strings like "June 29, 2026, 12:00 am").
+      // We only use this as a last resort since it can be locale-dependent, but it's
+      // better than treating every row as Infinity (which makes sorting appear broken).
+      const native = Date.parse(s);
+      if (Number.isFinite(native)) return native;
+
       return Number.POSITIVE_INFINITY;
     };
 
