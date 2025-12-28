@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeUrl, parsePortFromOrigin } from "@/lib/validation";
 
+export const maxDuration = 30;
+
 function asObj(v: unknown): Record<string, unknown> {
   return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
 }

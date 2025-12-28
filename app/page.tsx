@@ -698,31 +698,82 @@ export default function HomePage() {
         setBulkResults(preResults);
 
         await runPool(parsed, CONCURRENCY, async (item: (typeof parsed)[number]) => {
-          const res = await fetch("/api/check/xtream", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: item.url, username: item.username, password: item.password }),
-            signal,
-          });
-          const json = await res.json();
-          if (!res.ok || !json.ok) throw new Error(json?.error || "Check failed.");
+          if (signal.aborted) return;
 
-          setBulkResults((prev) =>
-            prev.concat({
-              lineNumber: item.lineNumber,
-              input: item.raw,
-              result: {
-                ok: true,
-                expiryDate: String(json.expiryDate ?? "N/A"),
-                maxConnections: String(json.maxConnections ?? "N/A"),
-                realUrl: String(json.realUrl ?? "N/A"),
-                port: String(json.port ?? "N/A"),
-                timezone: String(json.timezone ?? "N/A"),
-              },
-            })
-          );
+          try {
+            const res = await fetch("/api/check/xtream", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: item.url, username: item.username, password: item.password }),
+              signal,
+            });
 
-          setBulkDone((d) => d + 1);
+            const json: unknown = await res.json();
+            const jsonObj = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : {};
+
+            if (!res.ok || jsonObj["ok"] !== true) {
+              const err = typeof jsonObj["error"] === "string" ? String(jsonObj["error"]) : "Check failed.";
+              setBulkResults((prev) =>
+                prev.concat({
+                  lineNumber: item.lineNumber,
+                  input: item.raw,
+                  result: {
+                    ok: false,
+                    error: err,
+                    expiryDate: "N/A",
+                    maxConnections: "N/A",
+                    realUrl: "N/A",
+                    port: "N/A",
+                    timezone: "N/A",
+                  },
+                })
+              );
+              return;
+            }
+
+            setBulkResults((prev) =>
+              prev.concat({
+                lineNumber: item.lineNumber,
+                input: item.raw,
+                result: {
+                  ok: true,
+                  expiryDate: String(jsonObj["expiryDate"] ?? "N/A"),
+                  maxConnections: String(jsonObj["maxConnections"] ?? "N/A"),
+                  realUrl: String(jsonObj["realUrl"] ?? "N/A"),
+                  port: String(jsonObj["port"] ?? "N/A"),
+                  timezone: String(jsonObj["timezone"] ?? "N/A"),
+                },
+              })
+            );
+          } catch (e: unknown) {
+            if (
+              typeof e === "object" &&
+              e !== null &&
+              "name" in e &&
+              (e as { name?: unknown }).name === "AbortError"
+            ) {
+              return;
+            }
+
+            const msg = errMsg(e);
+            setBulkResults((prev) =>
+              prev.concat({
+                lineNumber: item.lineNumber,
+                input: item.raw,
+                result: {
+                  ok: false,
+                  error: msg,
+                  expiryDate: "N/A",
+                  maxConnections: "N/A",
+                  realUrl: "N/A",
+                  port: "N/A",
+                  timezone: "N/A",
+                },
+              })
+            );
+          } finally {
+            if (!signal.aborted) setBulkDone((d) => d + 1);
+          }
         });
       } else {
         const url = normalizeStalkerUrl(stalkerBulk.url);
@@ -767,33 +818,87 @@ export default function HomePage() {
         setBulkResults(preResults);
 
         await runPool(parsed, CONCURRENCY, async (item: (typeof parsed)[number]) => {
-          const res = await fetch("/api/check/stalker", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url, mac: item.mac }),
-            signal,
-          });
-          const json = await res.json();
-          if (!res.ok || !json.ok) throw new Error(json?.error || "Check failed.");
+          if (signal.aborted) return;
 
-          setBulkResults((prev) =>
-            prev.concat({
-              lineNumber: item.lineNumber,
-              input: item.mac,
-              result: {
-                ok: true,
-                expiryDate: String(json.expiryDate ?? "N/A"),
-                maxConnections: String(json.maxConnections ?? "N/A"),
-                realUrl: String(json.realUrl ?? "N/A"),
-                port: String(json.port ?? "N/A"),
-                timezone: String(json.timezone ?? "N/A"),
-                portalIp: String(json.portalIp ?? "N/A"),
-                channels: String(json.channels ?? "N/A"),
-              },
-            })
-          );
+          try {
+            const res = await fetch("/api/check/stalker", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url, mac: item.mac }),
+              signal,
+            });
+            const json: unknown = await res.json();
+            const jsonObj = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : {};
 
-          setBulkDone((d) => d + 1);
+            if (!res.ok || jsonObj["ok"] !== true) {
+              const err = typeof jsonObj["error"] === "string" ? String(jsonObj["error"]) : "Check failed.";
+              setBulkResults((prev) =>
+                prev.concat({
+                  lineNumber: item.lineNumber,
+                  input: item.mac,
+                  result: {
+                    ok: false,
+                    error: err,
+                    expiryDate: "N/A",
+                    maxConnections: "N/A",
+                    realUrl: "N/A",
+                    port: "N/A",
+                    timezone: "N/A",
+                    portalIp: "N/A",
+                    channels: "N/A",
+                  },
+                })
+              );
+              return;
+            }
+
+            setBulkResults((prev) =>
+              prev.concat({
+                lineNumber: item.lineNumber,
+                input: item.mac,
+                result: {
+                  ok: true,
+                  expiryDate: String(jsonObj["expiryDate"] ?? "N/A"),
+                  maxConnections: String(jsonObj["maxConnections"] ?? "N/A"),
+                  realUrl: String(jsonObj["realUrl"] ?? "N/A"),
+                  port: String(jsonObj["port"] ?? "N/A"),
+                  timezone: String(jsonObj["timezone"] ?? "N/A"),
+                  portalIp: String(jsonObj["portalIp"] ?? "N/A"),
+                  channels: String(jsonObj["channels"] ?? "N/A"),
+                },
+              })
+            );
+          } catch (e: unknown) {
+            if (
+              typeof e === "object" &&
+              e !== null &&
+              "name" in e &&
+              (e as { name?: unknown }).name === "AbortError"
+            ) {
+              return;
+            }
+
+            const msg = errMsg(e);
+            setBulkResults((prev) =>
+              prev.concat({
+                lineNumber: item.lineNumber,
+                input: item.mac,
+                result: {
+                  ok: false,
+                  error: msg,
+                  expiryDate: "N/A",
+                  maxConnections: "N/A",
+                  realUrl: "N/A",
+                  port: "N/A",
+                  timezone: "N/A",
+                  portalIp: "N/A",
+                  channels: "N/A",
+                },
+              })
+            );
+          } finally {
+            if (!signal.aborted) setBulkDone((d) => d + 1);
+          }
         });
       }
     } catch (e: unknown) {
