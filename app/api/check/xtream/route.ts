@@ -4,6 +4,20 @@ import { normalizeUrl, parsePortFromOrigin } from "@/lib/validation";
 
 export const maxDuration = 30;
 
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store",
+} as const;
+
+function requireClient(req: Request): Response | null {
+  // Lightweight anti-abuse gate. Not a security boundary by itself,
+  // but blocks naive scripts that just replay the endpoint without your UI.
+  const v = req.headers.get("x-zonenew-client");
+  if (v !== "1") {
+    return NextResponse.json({ ok: false, error: "Forbidden." }, { status: 403, headers: NO_STORE_HEADERS });
+  }
+  return null;
+}
+
 function asObj(v: unknown): Record<string, unknown> {
   return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
 }
@@ -27,18 +41,29 @@ function formatExpiry(exp: unknown): string {
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
   try {
+    const blocked = requireClient(req);
+    if (blocked) return blocked;
+
     // Validate credentials via player_api.php (Xtream Codes API).
     // We keep strict timeouts to avoid long-running serverless executions.
     const body = await req.json();
-    const url = normalizeUrl(body?.url);
-    const username = String(body?.username || "").trim();
-    const password = String(body?.password || "").trim();
+    const rawUrl = typeof body?.url === "string" ? body.url : String(body?.url ?? "");
+    const rawUser = typeof body?.username === "string" ? body.username : String(body?.username ?? "");
+    const rawPass = typeof body?.password === "string" ? body.password : String(body?.password ?? "");
+
+    if (rawUrl.length > 2048 || rawUser.length > 256 || rawPass.length > 256) {
+      return NextResponse.json({ requestId, ok: false, error: "Input too large." }, { status: 413, headers: NO_STORE_HEADERS });
+    }
+
+    const url = normalizeUrl(rawUrl);
+    const username = rawUser.trim();
+    const password = rawPass.trim();
 
     if (!username) {
-      return NextResponse.json({ requestId, ok: false, error: "Username is required." }, { status: 400 });
+      return NextResponse.json({ requestId, ok: false, error: "Username is required." }, { status: 400, headers: NO_STORE_HEADERS });
     }
     if (!password) {
-      return NextResponse.json({ requestId, ok: false, error: "Password is required." }, { status: 400 });
+      return NextResponse.json({ requestId, ok: false, error: "Password is required." }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
     const apiUrl = `${url}/player_api.php`;
@@ -68,7 +93,7 @@ export async function POST(req: Request) {
               ? "Xtream endpoint not found (HTTP 404). This server may not expose player_api.php, or the URL is wrong."
               : `Xtream server error (HTTP ${res.status}). Check URL and credentials.`,
         },
-        { status: 502 }
+        { status: 502, headers: NO_STORE_HEADERS }
       );
     }
 
@@ -79,7 +104,7 @@ export async function POST(req: Request) {
 
     if (Object.keys(userInfo).length === 0) {
       const msg = typeof jsonObj["message"] === "string" ? String(jsonObj["message"]) : "Invalid credentials or unsupported server.";
-      return NextResponse.json({ requestId, ok: false, error: msg }, { status: 401 });
+      return NextResponse.json({ requestId, ok: false, error: msg }, { status: 401, headers: NO_STORE_HEADERS });
     }
 
     const expiryDate = formatExpiry(userInfo["exp_date"]);
@@ -92,15 +117,18 @@ export async function POST(req: Request) {
     const realUrl = serverUrl ? serverUrl : url.replace(/^https?:\/\//i, "");
     const port = serverPort ? serverPort : parsePortFromOrigin(url);
 
-    return NextResponse.json({
-      requestId,
-      ok: true,
-      expiryDate,
-      maxConnections,
-      realUrl,
-      port,
-      timezone,
-    });
+    return NextResponse.json(
+      {
+        requestId,
+        ok: true,
+        expiryDate,
+        maxConnections,
+        realUrl,
+        port,
+        timezone,
+      },
+      { headers: NO_STORE_HEADERS }
+    );
   } catch (e: unknown) {
     const msg =
       typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError"
@@ -108,6 +136,6 @@ export async function POST(req: Request) {
         : e instanceof Error
           ? e.message
           : "Unknown error.";
-    return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500 });
+    return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }

@@ -2,6 +2,18 @@ import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeMac, normalizeStalkerUrl } from "@/lib/validation";
 
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store",
+} as const;
+
+function requireClient(req: Request): Response | null {
+  const v = req.headers.get("x-zonenew-client");
+  if (v !== "1") {
+    return NextResponse.json({ ok: false, error: "Forbidden." }, { status: 403, headers: NO_STORE_HEADERS });
+  }
+  return null;
+}
+
 function asObj(v: unknown): Record<string, unknown> {
   return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
 }
@@ -173,14 +185,24 @@ function pickLogo(item: unknown): string {
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
   try {
+    const blocked = requireClient(req);
+    if (blocked) return blocked;
+
     // Returns:
     // - genres (always)
     // - channels (only when genreId is provided)
     // Channels are paginated because Stalker portals can have very large lists.
     const body = await req.json();
-    const portalBase = normalizeStalkerUrl(body?.url);
+    const rawUrl = typeof body?.url === "string" ? body.url : String(body?.url ?? "");
+    const rawMac = typeof body?.mac === "string" ? body.mac : String(body?.mac ?? "");
+
+    if (rawUrl.length > 2048 || rawMac.length > 64) {
+      return NextResponse.json({ requestId, ok: false, error: "Input too large." }, { status: 413, headers: NO_STORE_HEADERS });
+    }
+
+    const portalBase = normalizeStalkerUrl(rawUrl);
     const origin = new URL(portalBase).origin;
-    const mac = normalizeMac(body?.mac);
+    const mac = normalizeMac(rawMac);
     const genreId = normalizeGenreId(body?.genreId);
     const page = normalizePage(body?.page);
 
@@ -273,15 +295,18 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({
-      requestId,
-      ok: true,
-      realUrl: baseUrlUsed,
-      genres,
-      channels,
-      page,
-      hasMore,
-    });
+    return NextResponse.json(
+      {
+        requestId,
+        ok: true,
+        realUrl: baseUrlUsed,
+        genres,
+        channels,
+        page,
+        hasMore,
+      },
+      { headers: NO_STORE_HEADERS }
+    );
   } catch (e: unknown) {
     const msg =
       typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError"
@@ -289,6 +314,6 @@ export async function POST(req: Request) {
         : e instanceof Error
           ? e.message
           : "Unknown error.";
-    return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500 });
+    return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }

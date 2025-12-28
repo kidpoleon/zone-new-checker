@@ -2,6 +2,18 @@ import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeUrl } from "@/lib/validation";
 
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store",
+} as const;
+
+function requireClient(req: Request): Response | null {
+  const v = req.headers.get("x-zonenew-client");
+  if (v !== "1") {
+    return NextResponse.json({ ok: false, error: "Forbidden." }, { status: 403, headers: NO_STORE_HEADERS });
+  }
+  return null;
+}
+
 function asObj(v: unknown): Record<string, unknown> {
   return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
 }
@@ -58,18 +70,29 @@ type XtreamStreamPayload = {
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
   try {
+    const blocked = requireClient(req);
+    if (blocked) return blocked;
+
     // Single endpoint that returns:
     // - categories (always)
     // - channels (only when categoryId is provided)
     // This keeps the UI logic simple while keeping API calls minimal.
     const body = await req.json();
-    const url = normalizeUrl(body?.url);
-    const username = String(body?.username || "").trim();
-    const password = String(body?.password || "").trim();
+    const rawUrl = typeof body?.url === "string" ? body.url : String(body?.url ?? "");
+    const rawUser = typeof body?.username === "string" ? body.username : String(body?.username ?? "");
+    const rawPass = typeof body?.password === "string" ? body.password : String(body?.password ?? "");
+
+    if (rawUrl.length > 2048 || rawUser.length > 256 || rawPass.length > 256) {
+      return NextResponse.json({ requestId, ok: false, error: "Input too large." }, { status: 413, headers: NO_STORE_HEADERS });
+    }
+
+    const url = normalizeUrl(rawUrl);
+    const username = rawUser.trim();
+    const password = rawPass.trim();
     const categoryId = normalizeCategoryId(body?.categoryId);
 
-    if (!username) return NextResponse.json({ requestId, ok: false, error: "Username is required." }, { status: 400 });
-    if (!password) return NextResponse.json({ requestId, ok: false, error: "Password is required." }, { status: 400 });
+    if (!username) return NextResponse.json({ requestId, ok: false, error: "Username is required." }, { status: 400, headers: NO_STORE_HEADERS });
+    if (!password) return NextResponse.json({ requestId, ok: false, error: "Password is required." }, { status: 400, headers: NO_STORE_HEADERS });
 
     const apiUrl = `${url}/player_api.php`;
 
@@ -99,14 +122,14 @@ export async function POST(req: Request) {
               ? "Xtream endpoint not found (HTTP 404). This server may not expose player_api.php, or the URL is wrong."
               : `Xtream server error (HTTP ${categoriesRes.status}). Check URL and credentials.`,
         },
-        { status: 502 }
+        { status: 502, headers: NO_STORE_HEADERS }
       );
     }
 
     const categoriesJson = await safeJson(categoriesRes);
     if (!Array.isArray(categoriesJson)) {
       const msg = typeof asObj(categoriesJson)["message"] === "string" ? String(asObj(categoriesJson)["message"]) : "Invalid credentials or unsupported server.";
-      return NextResponse.json({ requestId, ok: false, error: msg }, { status: 401 });
+      return NextResponse.json({ requestId, ok: false, error: msg }, { status: 401, headers: NO_STORE_HEADERS });
     }
 
     const categories: XtreamCategory[] = categoriesJson
@@ -140,7 +163,7 @@ export async function POST(req: Request) {
       if (!streamsRes.ok) {
         return NextResponse.json(
           { requestId, ok: false, error: `Failed to load channels (HTTP ${streamsRes.status}).` },
-          { status: 502 }
+          { status: 502, headers: NO_STORE_HEADERS }
         );
       }
 
@@ -163,12 +186,15 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({
-      requestId,
-      ok: true,
-      categories,
-      channels,
-    });
+    return NextResponse.json(
+      {
+        requestId,
+        ok: true,
+        categories,
+        channels,
+      },
+      { headers: NO_STORE_HEADERS }
+    );
   } catch (e: unknown) {
     const msg =
       typeof e === "object" && e !== null && "name" in e && (e as { name?: unknown }).name === "AbortError"
@@ -176,6 +202,6 @@ export async function POST(req: Request) {
         : e instanceof Error
           ? e.message
           : "Unknown error.";
-    return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500 });
+    return NextResponse.json({ requestId, ok: false, error: msg }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }

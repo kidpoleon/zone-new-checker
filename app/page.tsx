@@ -383,7 +383,7 @@ export default function HomePage() {
 
       const res = await fetch("/api/playlist/xtream", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
         body: JSON.stringify({ url, username, password }),
       });
       const json = await res.json();
@@ -422,7 +422,7 @@ export default function HomePage() {
 
       const res = await fetch("/api/playlist/xtream", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
         body: JSON.stringify({ url, username, password, categoryId }),
       });
       const json = await res.json();
@@ -456,7 +456,7 @@ export default function HomePage() {
 
       const res = await fetch("/api/playlist/stalker", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
         body: JSON.stringify({ url, mac }),
       });
       const json = await res.json();
@@ -496,7 +496,7 @@ export default function HomePage() {
 
       const res = await fetch("/api/playlist/stalker", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
         body: JSON.stringify({ url, mac, genreId, page }),
       });
       const json = await res.json();
@@ -630,7 +630,7 @@ export default function HomePage() {
 
         const res = await fetch("/api/check/xtream", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
           body: JSON.stringify({ url, username, password }),
         });
         const json = await res.json();
@@ -652,7 +652,7 @@ export default function HomePage() {
 
         const res = await fetch("/api/check/stalker", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
           body: JSON.stringify({ url, mac }),
         });
         const json = await res.json();
@@ -738,7 +738,7 @@ export default function HomePage() {
           try {
             const res = await fetch("/api/check/xtream", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
               body: JSON.stringify({ url: item.url, username: item.username, password: item.password }),
               signal,
             });
@@ -858,7 +858,7 @@ export default function HomePage() {
           try {
             const res = await fetch("/api/check/stalker", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
               body: JSON.stringify({ url, mac: item.mac }),
               signal,
             });
