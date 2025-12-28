@@ -104,6 +104,8 @@ export default function HomePage() {
 
   const [bulkTotal, setBulkTotal] = useState(0);
   const [bulkDone, setBulkDone] = useState(0);
+  const [bulkSortKey, setBulkSortKey] = useState<"input" | "status" | "expiry">("input");
+  const [bulkSortDir, setBulkSortDir] = useState<"asc" | "desc">("asc");
   const abortRef = useRef<AbortController | null>(null);
 
   const [playlistBusy, setPlaylistBusy] = useState(false);
@@ -226,15 +228,48 @@ export default function HomePage() {
   }, [mode, runMode]);
 
   const sortedBulkResults = useMemo(() => {
-    const copy = [...bulkResults];
-    copy.sort((a, b) => {
-      const an = a.lineNumber ?? Number.MAX_SAFE_INTEGER;
-      const bn = b.lineNumber ?? Number.MAX_SAFE_INTEGER;
-      if (an !== bn) return an - bn;
-      return a.input.localeCompare(b.input);
+    const parseExpiryTs = (v: unknown): number => {
+      if (typeof v !== "string") return Number.POSITIVE_INFINITY;
+      const s = v.trim();
+      if (!s || s === "N/A") return Number.POSITIVE_INFINITY;
+      if (s === "No Expiry") return Number.POSITIVE_INFINITY;
+      const m = /^\d{4}-\d{2}-\d{2}$/.exec(s);
+      if (!m) return Number.POSITIVE_INFINITY;
+      const t = Date.parse(`${s}T00:00:00Z`);
+      return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+    };
+
+    const dir = bulkSortDir === "asc" ? 1 : -1;
+
+    const withIdx = bulkResults.map((r, idx) => ({ r, idx }));
+    withIdx.sort((aa, bb) => {
+      const a = aa.r;
+      const b = bb.r;
+
+      if (bulkSortKey === "expiry") {
+        const at = parseExpiryTs(a.result.expiryDate);
+        const bt = parseExpiryTs(b.result.expiryDate);
+        if (at !== bt) return (at - bt) * dir;
+      } else if (bulkSortKey === "status") {
+        const ao = a.result.ok ? 0 : 1;
+        const bo = b.result.ok ? 0 : 1;
+        if (ao !== bo) return (ao - bo) * dir;
+      } else {
+        const an = a.lineNumber ?? Number.MAX_SAFE_INTEGER;
+        const bn = b.lineNumber ?? Number.MAX_SAFE_INTEGER;
+        if (an !== bn) return (an - bn) * dir;
+      }
+
+      const an2 = a.lineNumber ?? Number.MAX_SAFE_INTEGER;
+      const bn2 = b.lineNumber ?? Number.MAX_SAFE_INTEGER;
+      if (an2 !== bn2) return an2 - bn2;
+      const ic = a.input.localeCompare(b.input);
+      if (ic !== 0) return ic;
+      return aa.idx - bb.idx;
     });
-    return copy;
-  }, [bulkResults]);
+
+    return withIdx.map((x) => x.r);
+  }, [bulkResults, bulkSortDir, bulkSortKey]);
 
   const filteredXtreamChannels = useMemo(() => {
     const q = xtreamSearchDebounced.trim().toLowerCase();
@@ -1407,6 +1442,35 @@ export default function HomePage() {
 
       {runMode === "bulk" && bulkResults.length > 0 ? (
         <div className="panel">
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+            <div className="small">Sort:</div>
+            <select
+              value={bulkSortKey}
+              onChange={(e) => {
+                const next = e.target.value === "expiry" || e.target.value === "status" ? e.target.value : "input";
+                setBulkSortKey(next);
+              }}
+              disabled={busy}
+            >
+              <option value="input">Input order</option>
+              <option value="expiry">Expiry date</option>
+              <option value="status">Status</option>
+            </select>
+
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={() => setBulkSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+              title="Toggle ascending/descending"
+            >
+              {bulkSortDir === "asc" ? "Asc" : "Desc"}
+            </button>
+
+            {bulkSortKey === "expiry" ? (
+              <div className="small">Tip: use Asc for soonest expiry</div>
+            ) : null}
+          </div>
+
           <div className="tableWrap">
             <table className="table">
               <thead>
