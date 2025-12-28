@@ -487,6 +487,36 @@ input:focus, textarea:focus {
   background: rgba(255,255,255,0.03);
 }
 
+.thBtn {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thBtn:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.thBtn:hover {
+  color: var(--text);
+}
+
+.thIcon {
+  width: 12px;
+  display: inline-block;
+  text-align: center;
+  color: rgba(231, 238, 247, 0.65);
+}
+
 .kv {
   display: grid;
   grid-template-columns: 160px 1fr;

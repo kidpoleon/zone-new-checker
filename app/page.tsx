@@ -66,6 +66,10 @@ type StalkerSingleState = { url: string; mac: string };
 type XtreamBulkState = { lines: string };
 type StalkerBulkState = { url: string; macs: string };
 
+type BulkSortKey = "input" | "status" | "expiry" | "maxConnections" | "timezone" | "portalIp" | "channels";
+type BulkSortDir = "asc" | "desc";
+type BulkSortState = { key: BulkSortKey; dir: BulkSortDir } | null;
+
 const LS_KEY = "iptv_checker_v1";
 const LS_PLAYLIST_PREFS = "iptv_checker_v1_playlist_prefs";
 
@@ -104,8 +108,7 @@ export default function HomePage() {
 
   const [bulkTotal, setBulkTotal] = useState(0);
   const [bulkDone, setBulkDone] = useState(0);
-  const [bulkSortKey, setBulkSortKey] = useState<"input" | "status" | "expiry">("input");
-  const [bulkSortDir, setBulkSortDir] = useState<"asc" | "desc">("asc");
+  const [bulkSort, setBulkSort] = useState<BulkSortState>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const [playlistBusy, setPlaylistBusy] = useState(false);
@@ -233,43 +236,149 @@ export default function HomePage() {
       const s = v.trim();
       if (!s || s === "N/A") return Number.POSITIVE_INFINITY;
       if (s === "No Expiry") return Number.POSITIVE_INFINITY;
-      const m = /^\d{4}-\d{2}-\d{2}$/.exec(s);
-      if (!m) return Number.POSITIVE_INFINITY;
-      const t = Date.parse(`${s}T00:00:00Z`);
-      return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+
+      // Epoch seconds/millis
+      if (/^[0-9]{9,13}$/.test(s)) {
+        let n = Number(s);
+        if (!Number.isFinite(n) || n <= 0) return Number.POSITIVE_INFINITY;
+        if (s.length >= 13) n = Math.floor(n / 1000);
+        const t = n * 1000;
+        return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+      }
+
+      // YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        const t = Date.parse(`${s}T00:00:00Z`);
+        return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+      }
+
+      // YYYY-MM-DD HH:MM:SS (or without seconds)
+      const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})\s+([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?$/.exec(s);
+      if (m) {
+        const yyyy = Number(m[1]);
+        const mm = Number(m[2]);
+        const dd = Number(m[3]);
+        const hh = Number(m[4]);
+        const mi = Number(m[5]);
+        const ss = m[6] ? Number(m[6]) : 0;
+        if (yyyy > 0 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+          const t = Date.UTC(yyyy, mm - 1, dd, hh, mi, ss);
+          return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+        }
+      }
+
+      return Number.POSITIVE_INFINITY;
     };
 
-    const dir = bulkSortDir === "asc" ? 1 : -1;
+    const parseIntSafe = (v: unknown): number => {
+      const n = typeof v === "number" ? v : Number(String(v ?? "").trim());
+      return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+    };
+
+    const parseIpKey = (v: unknown): number[] => {
+      if (typeof v !== "string") return [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+      const s = v.trim();
+      const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+      if (!m) return [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+      const parts = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+      for (const p of parts) {
+        if (!Number.isFinite(p) || p < 0 || p > 255) {
+          return [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+        }
+      }
+      return parts;
+    };
 
     const withIdx = bulkResults.map((r, idx) => ({ r, idx }));
+
+    // "None" state: return original stable input order.
+    if (!bulkSort) {
+      withIdx.sort((aa, bb) => {
+        const a = aa.r;
+        const b = bb.r;
+        const an = a.lineNumber ?? Number.MAX_SAFE_INTEGER;
+        const bn = b.lineNumber ?? Number.MAX_SAFE_INTEGER;
+        if (an !== bn) return an - bn;
+        return aa.idx - bb.idx;
+      });
+      return withIdx.map((x) => x.r);
+    }
+
+    const dir = bulkSort.dir === "asc" ? 1 : -1;
+    const bulkSortKey = bulkSort.key;
+
     withIdx.sort((aa, bb) => {
       const a = aa.r;
       const b = bb.r;
 
-      if (bulkSortKey === "expiry") {
-        const at = parseExpiryTs(a.result.expiryDate);
-        const bt = parseExpiryTs(b.result.expiryDate);
-        if (at !== bt) return (at - bt) * dir;
+      if (bulkSortKey === "input") {
+        const c = a.input.localeCompare(b.input);
+        if (c !== 0) return c * dir;
       } else if (bulkSortKey === "status") {
+        // Availability: OK first
         const ao = a.result.ok ? 0 : 1;
         const bo = b.result.ok ? 0 : 1;
         if (ao !== bo) return (ao - bo) * dir;
-      } else {
-        const an = a.lineNumber ?? Number.MAX_SAFE_INTEGER;
-        const bn = b.lineNumber ?? Number.MAX_SAFE_INTEGER;
-        if (an !== bn) return (an - bn) * dir;
+        const am = (a.result.ok ? "OK" : a.result.error || "").toLowerCase();
+        const bm = (b.result.ok ? "OK" : b.result.error || "").toLowerCase();
+        const c = am.localeCompare(bm);
+        if (c !== 0) return c * dir;
+      } else if (bulkSortKey === "expiry") {
+        const at = parseExpiryTs(a.result.expiryDate);
+        const bt = parseExpiryTs(b.result.expiryDate);
+        if (at !== bt) return (at - bt) * dir;
+      } else if (bulkSortKey === "maxConnections") {
+        const at = parseIntSafe(a.result.maxConnections);
+        const bt = parseIntSafe(b.result.maxConnections);
+        if (at !== bt) return (at - bt) * dir;
+      } else if (bulkSortKey === "timezone") {
+        const at = String(a.result.timezone || "").trim().toLowerCase();
+        const bt = String(b.result.timezone || "").trim().toLowerCase();
+        const c = at.localeCompare(bt);
+        if (c !== 0) return c * dir;
+      } else if (bulkSortKey === "portalIp") {
+        const ak = parseIpKey(a.result.portalIp);
+        const bk = parseIpKey(b.result.portalIp);
+        for (let i = 0; i < 4; i++) {
+          if (ak[i] !== bk[i]) return (ak[i] - bk[i]) * dir;
+        }
+      } else if (bulkSortKey === "channels") {
+        const at = parseIntSafe(a.result.channels);
+        const bt = parseIntSafe(b.result.channels);
+        if (at !== bt) return (at - bt) * dir;
       }
 
-      const an2 = a.lineNumber ?? Number.MAX_SAFE_INTEGER;
-      const bn2 = b.lineNumber ?? Number.MAX_SAFE_INTEGER;
-      if (an2 !== bn2) return an2 - bn2;
-      const ic = a.input.localeCompare(b.input);
-      if (ic !== 0) return ic;
+      // Stable fallback: original input order, then insertion order
+      const an = a.lineNumber ?? Number.MAX_SAFE_INTEGER;
+      const bn = b.lineNumber ?? Number.MAX_SAFE_INTEGER;
+      if (an !== bn) return an - bn;
       return aa.idx - bb.idx;
     });
 
     return withIdx.map((x) => x.r);
-  }, [bulkResults, bulkSortDir, bulkSortKey]);
+  }, [bulkResults, bulkSort]);
+
+  function toggleBulkSort(key: BulkSortKey) {
+    setBulkSort((cur) => {
+      const defaultDir: BulkSortDir = key === "expiry" ? "desc" : "asc";
+      const oppositeDir: BulkSortDir = defaultDir === "asc" ? "desc" : "asc";
+
+      // none -> default
+      if (!cur) return { key, dir: defaultDir };
+
+      // different key -> default
+      if (cur.key !== key) return { key, dir: defaultDir };
+
+      // same key: default -> opposite -> none
+      if (cur.dir === defaultDir) return { key, dir: oppositeDir };
+      return null;
+    });
+  }
+
+  function sortIndicator(key: BulkSortKey): string {
+    if (!bulkSort || bulkSort.key !== key) return "";
+    return bulkSort.dir === "asc" ? "↑" : "↓";
+  }
 
   const filteredXtreamChannels = useMemo(() => {
     const q = xtreamSearchDebounced.trim().toLowerCase();
@@ -1442,48 +1551,49 @@ export default function HomePage() {
 
       {runMode === "bulk" && bulkResults.length > 0 ? (
         <div className="panel">
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-            <div className="small">Sort:</div>
-            <select
-              value={bulkSortKey}
-              onChange={(e) => {
-                const next = e.target.value === "expiry" || e.target.value === "status" ? e.target.value : "input";
-                setBulkSortKey(next);
-              }}
-              disabled={busy}
-            >
-              <option value="input">Input order</option>
-              <option value="expiry">Expiry date</option>
-              <option value="status">Status</option>
-            </select>
-
-            <button
-              className="btn"
-              disabled={busy}
-              onClick={() => setBulkSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-              title="Toggle ascending/descending"
-            >
-              {bulkSortDir === "asc" ? "Asc" : "Desc"}
-            </button>
-
-            {bulkSortKey === "expiry" ? (
-              <div className="small">Tip: use Asc for soonest expiry</div>
-            ) : null}
-          </div>
-
           <div className="tableWrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Input</th>
-                  <th>Status</th>
-                  <th>Expiry</th>
-                  {mode === "xtream" ? <th>Max</th> : null}
-                  <th>Real URL</th>
-                  <th>Port</th>
-                  <th>Timezone</th>
-                  {mode === "stalker" ? <th>Portal IP</th> : null}
-                  {mode === "stalker" ? <th>Channels</th> : null}
+                  <th>
+                    <button className="thBtn" type="button" disabled={busy} onClick={() => toggleBulkSort("input")}>
+                      Input <span className="thIcon">{sortIndicator("input")}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button className="thBtn" type="button" disabled={busy} onClick={() => toggleBulkSort("status")}>
+                      Status <span className="thIcon">{sortIndicator("status")}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button className="thBtn" type="button" disabled={busy} onClick={() => toggleBulkSort("expiry")}>
+                      Expiry <span className="thIcon">{sortIndicator("expiry")}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button className="thBtn" type="button" disabled={busy} onClick={() => toggleBulkSort("maxConnections")}>
+                      Max <span className="thIcon">{sortIndicator("maxConnections")}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button className="thBtn" type="button" disabled={busy} onClick={() => toggleBulkSort("timezone")}>
+                      Timezone <span className="thIcon">{sortIndicator("timezone")}</span>
+                    </button>
+                  </th>
+                  {mode === "stalker" ? (
+                    <th>
+                      <button className="thBtn" type="button" disabled={busy} onClick={() => toggleBulkSort("portalIp")}>
+                        Portal IP <span className="thIcon">{sortIndicator("portalIp")}</span>
+                      </button>
+                    </th>
+                  ) : null}
+                  {mode === "stalker" ? (
+                    <th>
+                      <button className="thBtn" type="button" disabled={busy} onClick={() => toggleBulkSort("channels")}>
+                        Channels <span className="thIcon">{sortIndicator("channels")}</span>
+                      </button>
+                    </th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
@@ -1494,9 +1604,7 @@ export default function HomePage() {
                     </td>
                     <td>{r.result.ok ? "OK" : r.result.error || "Failed"}</td>
                     <td>{r.result.expiryDate}</td>
-                    {mode === "xtream" ? <td>{r.result.maxConnections}</td> : null}
-                    <td className="mono">{r.result.realUrl}</td>
-                    <td>{r.result.port}</td>
+                    <td>{r.result.maxConnections}</td>
                     <td>{r.result.timezone}</td>
                     {mode === "stalker" ? <td className="mono">{r.result.portalIp || "N/A"}</td> : null}
                     {mode === "stalker" ? <td>{r.result.channels || "N/A"}</td> : null}
