@@ -33,6 +33,15 @@ function isReal(v: unknown): boolean {
   return true;
 }
 
+function isoDateFromMs(ms: number): string {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "N/A";
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function formatEpoch(v: string): string {
   const s = String(v).trim();
   if (!/^[0-9]{9,13}$/.test(s)) return s;
@@ -43,16 +52,7 @@ function formatEpoch(v: string): string {
   if (s.length >= 13) n = Math.floor(n / 1000);
   if (n <= 0) return "N/A";
 
-  const d = new Date(n * 1000);
-  if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleString("en-US", {
-    month: "long",
-    day: "2-digit",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return isoDateFromMs(n * 1000);
 }
 
 function expiryTsFromEpoch(v: string): number | null {
@@ -97,14 +97,7 @@ function formatMysqlDateTime(v: string): string {
   const d = new Date(Date.UTC(yyyy, mm - 1, dd, hh, mi, ss));
   if (Number.isNaN(d.getTime())) return v;
 
-  return d.toLocaleString("en-US", {
-    month: "long",
-    day: "2-digit",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return isoDateFromMs(d.getTime());
 }
 
 function pickExpiry(jsAccount: unknown, jsProfile: unknown): string {
