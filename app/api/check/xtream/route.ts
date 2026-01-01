@@ -38,6 +38,14 @@ function formatExpiry(exp: unknown): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+async function readJsonBody(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
+  } catch {
+    throw new Error("Invalid JSON body.");
+  }
+}
+
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
   try {
@@ -49,20 +57,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ requestId, ok: false, error: "Unsupported content type." }, { status: 415, headers: NO_STORE_HEADERS });
     }
 
-    // Validate credentials via player_api.php (Xtream Codes API).
-    // We keep strict timeouts to avoid long-running serverless executions.
-    const body = await req.json();
-    const rawUrl = typeof body?.url === "string" ? body.url : String(body?.url ?? "");
-    const rawUser = typeof body?.username === "string" ? body.username : String(body?.username ?? "");
-    const rawPass = typeof body?.password === "string" ? body.password : String(body?.password ?? "");
+    const body = await readJsonBody(req);
+    const b = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const rawUrl = typeof b["url"] === "string" ? String(b["url"]) : String(b["url"] ?? "");
+    const rawUser = typeof b["username"] === "string" ? String(b["username"]) : String(b["username"] ?? "");
+    const rawPass = typeof b["password"] === "string" ? String(b["password"]) : String(b["password"] ?? "");
 
     if (rawUrl.length > 2048 || rawUser.length > 256 || rawPass.length > 256) {
       return NextResponse.json({ requestId, ok: false, error: "Input too large." }, { status: 413, headers: NO_STORE_HEADERS });
     }
 
-    const url = normalizeUrl(rawUrl);
-    const username = rawUser.trim();
-    const password = rawPass.trim();
+    let url = "";
+    let username = "";
+    let password = "";
+    try {
+      url = normalizeUrl(rawUrl);
+      username = rawUser.trim();
+      password = rawPass.trim();
+    } catch (e: unknown) {
+      return NextResponse.json(
+        { requestId, ok: false, error: e instanceof Error ? e.message : "Invalid input." },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
+    }
 
     if (!username) {
       return NextResponse.json({ requestId, ok: false, error: "Username is required." }, { status: 400, headers: NO_STORE_HEADERS });
@@ -114,6 +131,7 @@ export async function POST(req: Request) {
 
     const expiryDate = formatExpiry(userInfo["exp_date"]);
     const maxConnections = String(userInfo["max_connections"] ?? "N/A");
+    const activeConnections = String(userInfo["active_cons"] ?? "N/A");
 
     const serverUrl = String(serverInfo["url"] ?? "").trim();
     const serverPort = String(serverInfo["port"] ?? "").trim();
@@ -128,6 +146,7 @@ export async function POST(req: Request) {
         ok: true,
         expiryDate,
         maxConnections,
+        activeConnections,
         realUrl,
         port,
         timezone,

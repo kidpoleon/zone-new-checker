@@ -182,6 +182,14 @@ function pickLogo(item: unknown): string {
   return "";
 }
 
+async function readJsonBody(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
+  } catch {
+    throw new Error("Invalid JSON body.");
+  }
+}
+
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
   try {
@@ -193,23 +201,34 @@ export async function POST(req: Request) {
       return NextResponse.json({ requestId, ok: false, error: "Unsupported content type." }, { status: 415, headers: NO_STORE_HEADERS });
     }
 
-    // Returns:
-    // - genres (always)
-    // - channels (only when genreId is provided)
-    // Channels are paginated because Stalker portals can have very large lists.
-    const body = await req.json();
-    const rawUrl = typeof body?.url === "string" ? body.url : String(body?.url ?? "");
-    const rawMac = typeof body?.mac === "string" ? body.mac : String(body?.mac ?? "");
+    const body = await readJsonBody(req);
+    const b = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const rawUrl = typeof b["url"] === "string" ? String(b["url"]) : String(b["url"] ?? "");
+    const rawMac = typeof b["mac"] === "string" ? String(b["mac"]) : String(b["mac"] ?? "");
 
     if (rawUrl.length > 2048 || rawMac.length > 64) {
       return NextResponse.json({ requestId, ok: false, error: "Input too large." }, { status: 413, headers: NO_STORE_HEADERS });
     }
 
-    const portalBase = normalizeStalkerUrl(rawUrl);
-    const origin = new URL(portalBase).origin;
-    const mac = normalizeMac(rawMac);
-    const genreId = normalizeGenreId(body?.genreId);
-    const page = normalizePage(body?.page);
+    let portalBase = "";
+    let origin = "";
+    let mac = "";
+    let genreId = "";
+    let page = 0;
+    let all = false;
+    try {
+      portalBase = normalizeStalkerUrl(rawUrl);
+      origin = new URL(portalBase).origin;
+      mac = normalizeMac(rawMac);
+      genreId = normalizeGenreId(b["genreId"]);
+      page = normalizePage(b["page"]);
+      all = Boolean(b["all"]);
+    } catch (e: unknown) {
+      return NextResponse.json(
+        { requestId, ok: false, error: e instanceof Error ? e.message : "Invalid input." },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
+    }
 
     let headers: Record<string, string> | null = null;
     let baseUrlUsed: string = portalBase;
@@ -254,49 +273,141 @@ export async function POST(req: Request) {
 
     let channels: StalkerChannel[] = [];
     let hasMore = false;
+    let pageOut = page;
     if (genreId) {
-      const listUrls = [
-        `${portalBase}/portal.php?type=itv&action=get_ordered_list&genre=${encodeURIComponent(genreId)}&p=${page}&JsHttpRequest=1-xml`,
-        `${origin}/stalker_portal/server/load.php?type=itv&action=get_ordered_list&genre=${encodeURIComponent(genreId)}&p=${page}&JsHttpRequest=1-xml`,
-      ];
+      const MAX_PAGES = 200;
+      const MAX_CHANNELS = 15000;
+      const CONCURRENCY = 6;
 
-      let listPayload: unknown = null;
-      for (const u of listUrls) {
-        const res = await fetchWithTimeout(u, { headers, timeoutMs: 25000 });
-        if (res.ok) {
-          listPayload = await safeJson(res);
-          break;
+      const fetchPage = async (p: number): Promise<{ chans: StalkerChannel[]; hasMore: boolean; totalItems?: number; perPage?: number }> => {
+        const listUrls = [
+          `${portalBase}/portal.php?type=itv&action=get_ordered_list&genre=${encodeURIComponent(genreId)}&p=${p}&JsHttpRequest=1-xml`,
+          `${origin}/stalker_portal/server/load.php?type=itv&action=get_ordered_list&genre=${encodeURIComponent(genreId)}&p=${p}&JsHttpRequest=1-xml`,
+        ];
+
+        let listPayload: unknown = null;
+        for (const u of listUrls) {
+          const res = await fetchWithTimeout(u, { headers, timeoutMs: 25000 });
+          if (res.ok) {
+            listPayload = await safeJson(res);
+            break;
+          }
         }
-      }
 
-      const js = asObj(listPayload)["js"];
-      const jsObj = asObj(js);
-      const data = Array.isArray(jsObj["data"]) ? (jsObj["data"] as unknown[]) : Array.isArray(js) ? (js as unknown[]) : null;
-      if (Array.isArray(data)) {
-        channels = data
-          .map((c: unknown) => {
-            const cc = asObj(c) as StalkerChannelPayload;
-            const id = isReal(cc.id) ? String(cc.id).trim() : isReal(cc.ch_id) ? String(cc.ch_id).trim() : "";
-            const name = isReal(cc.name) ? String(cc.name).trim() : isReal(cc.title) ? String(cc.title).trim() : "";
-            const logoRaw = pickLogo(c);
-            const logo = logoRaw ? absolutizeMaybe(portalBase, logoRaw) : "";
-            const out: StalkerChannel = { id, name };
-            if (logo) out.logo = logo;
-            return out;
-          })
-          .filter((x: StalkerChannel) => x.id && x.name);
+        const js = asObj(listPayload)["js"];
+        const jsObj = asObj(js);
+        const data = Array.isArray(jsObj["data"]) ? (jsObj["data"] as unknown[]) : Array.isArray(js) ? (js as unknown[]) : null;
+
+        let out: StalkerChannel[] = [];
+        if (Array.isArray(data)) {
+          out = data
+            .map((c: unknown) => {
+              const cc = asObj(c) as StalkerChannelPayload;
+              const id = isReal(cc.id) ? String(cc.id).trim() : isReal(cc.ch_id) ? String(cc.ch_id).trim() : "";
+              const name = isReal(cc.name) ? String(cc.name).trim() : isReal(cc.title) ? String(cc.title).trim() : "";
+              const logoRaw = pickLogo(c);
+              const logo = logoRaw ? absolutizeMaybe(portalBase, logoRaw) : "";
+              const ch: StalkerChannel = { id, name };
+              if (logo) ch.logo = logo;
+              return ch;
+            })
+            .filter((x: StalkerChannel) => x.id && x.name);
+        }
 
         const totalItemsRaw = jsObj["total_items"];
         const perPageRaw = jsObj["max_page_items"];
         const totalItems = isReal(totalItemsRaw) ? Number(String(totalItemsRaw)) : NaN;
-        const perPage = isReal(perPageRaw) ? Number(String(perPageRaw)) : channels.length;
+        const perPage = isReal(perPageRaw) ? Number(String(perPageRaw)) : out.length;
+
+        let more = false;
         if (Number.isFinite(totalItems) && totalItems >= 0 && Number.isFinite(perPage) && perPage > 0) {
-          const loaded = page * perPage + channels.length;
-          hasMore = loaded < totalItems;
+          const loaded = p * perPage + out.length;
+          more = loaded < totalItems;
         } else {
-          // If the portal doesn't expose totals, treat a full page as possibly having more.
-          hasMore = channels.length > 0;
+          more = out.length > 0;
         }
+
+        return {
+          chans: out,
+          hasMore: more,
+          totalItems: Number.isFinite(totalItems) ? totalItems : undefined,
+          perPage: Number.isFinite(perPage) ? perPage : undefined,
+        };
+      };
+
+      async function runPool<T>(items: T[], concurrency: number, worker: (item: T, idx: number) => Promise<void>) {
+        const pool = new Set<Promise<void>>();
+        for (let i = 0; i < items.length; i++) {
+          const p = worker(items[i], i)
+            .catch(() => {
+              // worker handles errors
+            })
+            .finally(() => {
+              pool.delete(p);
+            });
+          pool.add(p);
+          if (pool.size >= concurrency) {
+            await Promise.race(pool);
+          }
+        }
+        await Promise.all(pool);
+      }
+
+      if (all) {
+        const allChans: StalkerChannel[] = [];
+        const seen = new Set<string>();
+
+        const add = (list: StalkerChannel[]) => {
+          for (const ch of list) {
+            if (seen.has(ch.id)) continue;
+            seen.add(ch.id);
+            allChans.push(ch);
+            if (allChans.length >= MAX_CHANNELS) break;
+          }
+        };
+
+        // Always fetch page 0 first to discover totals/per-page if available.
+        const first = await fetchPage(0);
+        if (first.chans.length === 0) {
+          channels = [];
+          hasMore = false;
+          pageOut = 0;
+        } else {
+          add(first.chans);
+
+          const totalItems = typeof first.totalItems === "number" ? first.totalItems : undefined;
+          const perPage = typeof first.perPage === "number" ? first.perPage : undefined;
+          const canPlan = typeof totalItems === "number" && typeof perPage === "number" && perPage > 0 && totalItems >= 0;
+          const plannedPages = canPlan ? Math.min(MAX_PAGES, Math.ceil(totalItems / perPage)) : 0;
+
+          if (plannedPages > 1) {
+            const pages = Array.from({ length: plannedPages - 1 }, (_, i) => i + 1);
+            await runPool(pages, CONCURRENCY, async (p) => {
+              if (allChans.length >= MAX_CHANNELS) return;
+              const r = await fetchPage(p);
+              if (r.chans.length === 0) return;
+              add(r.chans);
+            });
+          } else if (first.hasMore) {
+            // Fallback when totals are missing or unreliable: sequential until empty.
+            for (let p = 1; p < MAX_PAGES; p++) {
+              if (allChans.length >= MAX_CHANNELS) break;
+              const r = await fetchPage(p);
+              if (r.chans.length === 0) break;
+              add(r.chans);
+              if (!r.hasMore) break;
+            }
+          }
+
+          channels = allChans;
+          hasMore = false;
+          pageOut = 0;
+        }
+      } else {
+        const r = await fetchPage(page);
+        channels = r.chans;
+        hasMore = r.hasMore;
+        pageOut = page;
       }
     }
 
@@ -307,7 +418,7 @@ export async function POST(req: Request) {
         realUrl: baseUrlUsed,
         genres,
         channels,
-        page,
+        page: pageOut,
         hasMore,
       },
       { headers: NO_STORE_HEADERS }

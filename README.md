@@ -59,8 +59,10 @@ Displayed fields (depending on protocol):
 - One-click **Check** (validation + auto-load playlist)
 - **Playlist Viewer**
   - Xtream categories + channels (fast)
-  - Stalker genres + channels (paginated)
+  - Stalker genres + channels (fetches all pages server-side for the selected genre)
   - Search in categories/genres and channels
+  - Channel sorting (Name/ID, Asc/Desc)
+  - Mobile-friendly playlist UI (Categories/Genres + Channels are tabs on small screens)
   - Remembers last selected category/genre per server (localStorage)
   - Clear selection button
 
@@ -264,6 +266,11 @@ All routes return JSON with:
 - `ok: boolean`
 - `error?: string`
 
+All POST routes expect:
+
+- `Content-Type: application/json`
+- `X-ZoneNew-Client: 1`
+
 ### `POST /api/check/xtream`
 
 Validates Xtream credentials using:
@@ -292,7 +299,10 @@ Returns:
 
 - genres (always)
 - channels (only when `genreId` is provided)
-- pagination: `page`, `hasMore`
+
+Note:
+
+- The UI requests **all channels** for the selected genre in one response (server loops pages with safety caps).
 
 ### `GET /api/image?url=...`
 
@@ -318,6 +328,12 @@ Plain English:
 
 - Your credentials are not scraped/collected.
 - Your credentials are only sent to the IPTV server you typed in (because that's the only way to validate them).
+
+Abuse / safety notes:
+
+- `/api/image` has basic anti-abuse protection (client header gate + simple rate limit + blocks localhost/private IPs).
+- `/api/check/*` and `/api/playlist/*` enforce JSON content-type and input size caps.
+- All upstream portal requests use strict timeouts.
 
 If you want maximum privacy:
 

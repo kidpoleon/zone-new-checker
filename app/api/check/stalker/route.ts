@@ -100,37 +100,6 @@ function formatMysqlDateTime(v: string): string {
   return isoDateFromMs(d.getTime());
 }
 
-function pickExpiry(jsAccount: unknown, jsProfile: unknown): string {
-  // Stalker portals are inconsistent: expiry may be epoch seconds, MySQL datetime,
-  // or even shoved into unrelated fields (e.g. `phone`). We scan common candidates.
-  const a = asObj(jsAccount);
-  const p = asObj(jsProfile);
-  const candidates = [
-    a["expire_billing_date"],
-    p["expire_billing_date"],
-    // Some portals abuse `phone` to store expiry (MacAttack reads this)
-    a["phone"],
-    p["phone"],
-    a["expire_date"],
-    p["expire_date"],
-    a["exp_date"],
-    p["exp_date"],
-  ];
-
-  for (const c of candidates) {
-    if (isReal(c)) {
-      const s = String(c);
-      if (/^[0-9]{9,13}$/.test(s)) return formatEpoch(s);
-      // If it looks like MySQL datetime, format it.
-      if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}\s+[0-9]{2}:[0-9]{2}/.test(s)) {
-        return formatMysqlDateTime(s);
-      }
-      return s;
-    }
-  }
-  return "N/A";
-}
-
 function pickExpiryInfo(jsAccount: unknown, jsProfile: unknown): { expiryDate: string; expiryTs?: number } {
   const a = asObj(jsAccount);
   const p = asObj(jsProfile);
@@ -210,6 +179,14 @@ function pickMaxOnline(jsAccount: unknown, jsProfile: unknown): string {
   const v = a["max_online"] ?? p["max_online"];
   if (isReal(v)) return String(v);
   return "N/A";
+}
+
+async function readJsonBody(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
+  } catch {
+    throw new Error("Invalid JSON body.");
+  }
 }
 
 async function tryPortalPhp(baseUrl: string, mac: string) {
@@ -342,21 +319,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ requestId, ok: false, error: "Unsupported content type." }, { status: 415, headers: NO_STORE_HEADERS });
     }
 
-    // NOTE: This endpoint is intentionally defensive:
-    // - normalizes URL/MAC
-    // - tries both portal.php and stalker_portal/server/load.php styles
-    // - uses timeouts to avoid hanging serverless lambdas
-    const body = await req.json();
-    const rawUrl = typeof body?.url === "string" ? body.url : String(body?.url ?? "");
-    const rawMac = typeof body?.mac === "string" ? body.mac : String(body?.mac ?? "");
+    const body = await readJsonBody(req);
+    const b = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const rawUrl = typeof b["url"] === "string" ? String(b["url"]) : String(b["url"] ?? "");
+    const rawMac = typeof b["mac"] === "string" ? String(b["mac"]) : String(b["mac"] ?? "");
 
     if (rawUrl.length > 2048 || rawMac.length > 64) {
       return NextResponse.json({ requestId, ok: false, error: "Input too large." }, { status: 413, headers: NO_STORE_HEADERS });
     }
 
-    const portalBase = normalizeStalkerUrl(rawUrl);
-    const origin = new URL(portalBase).origin;
-    const mac = normalizeMac(rawMac);
+    let portalBase = "";
+    let origin = "";
+    let mac = "";
+    try {
+      portalBase = normalizeStalkerUrl(rawUrl);
+      origin = new URL(portalBase).origin;
+      mac = normalizeMac(rawMac);
+    } catch (e: unknown) {
+      return NextResponse.json(
+        { requestId, ok: false, error: e instanceof Error ? e.message : "Invalid input." },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
+    }
 
     let profileJson: unknown = {};
     let accountJson: unknown = {};

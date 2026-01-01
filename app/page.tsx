@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BulkRowResult, CheckResult, Mode, RunMode } from "@/lib/types";
 import {
   normalizeMac,
@@ -24,12 +24,14 @@ function VirtualList<T>({
   items,
   itemHeight,
   height,
+  gap = 8,
   render,
   className,
 }: {
   items: T[];
   itemHeight: number;
   height: number;
+  gap?: number;
   render: (item: T, idx: number) => JSX.Element;
   className?: string;
 }) {
@@ -38,10 +40,11 @@ function VirtualList<T>({
   const [scrollTop, setScrollTop] = useState(0);
   const total = items.length;
   const overscan = 8;
-  const start = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
-  const visibleCount = Math.ceil(height / itemHeight) + overscan * 2;
+  const step = itemHeight + gap;
+  const start = Math.max(0, Math.floor(scrollTop / step) - overscan);
+  const visibleCount = Math.ceil(height / step) + overscan * 2;
   const end = Math.min(total, start + visibleCount);
-  const offsetY = start * itemHeight;
+  const offsetY = start * step;
 
   return (
     <div
@@ -51,8 +54,8 @@ function VirtualList<T>({
         setScrollTop(e.currentTarget.scrollTop);
       }}
     >
-      <div style={{ height: total * itemHeight, position: "relative" }}>
-        <div style={{ position: "absolute", top: offsetY, left: 0, right: 0, display: "grid", gap: 8 }}>
+      <div style={{ height: Math.max(0, total * step - gap), position: "relative" }}>
+        <div style={{ position: "absolute", top: offsetY, left: 0, right: 0, display: "grid", gap }}>
           {items.slice(start, end).map((it, i) => render(it, start + i))}
         </div>
       </div>
@@ -95,6 +98,14 @@ export default function HomePage() {
   const [mode, setMode] = useState<Mode>("xtream");
   const [runMode, setRunMode] = useState<RunMode>("single");
 
+  const [xtreamPlaylistTab, setXtreamPlaylistTab] = useState<"list" | "channels">("list");
+  const [stalkerPlaylistTab, setStalkerPlaylistTab] = useState<"list" | "channels">("list");
+
+  const [xtreamChannelSort, setXtreamChannelSort] = useState<"name" | "id">("name");
+  const [xtreamChannelSortDir, setXtreamChannelSortDir] = useState<BulkSortDir>("asc");
+  const [stalkerChannelSort, setStalkerChannelSort] = useState<"name" | "id">("name");
+  const [stalkerChannelSortDir, setStalkerChannelSortDir] = useState<BulkSortDir>("asc");
+
   const [xtreamSingle, setXtreamSingle] = useState<XtreamSingleState>({ url: "", username: "", password: "" });
   const [stalkerSingle, setStalkerSingle] = useState<StalkerSingleState>({ url: "", mac: "" });
 
@@ -121,13 +132,16 @@ export default function HomePage() {
   const [xtreamSearch, setXtreamSearch] = useState<string>("");
   const [xtreamCatSearch, setXtreamCatSearch] = useState<string>("");
 
+  const [copiedXtreamStreamId, setCopiedXtreamStreamId] = useState<string>("");
+  const [toast, setToast] = useState<string>("");
+  const toastTimerRef = useRef<number | null>(null);
+  const [xtreamHoverUrl, setXtreamHoverUrl] = useState<string>("");
+
   const [stalkerGenres, setStalkerGenres] = useState<StalkerPlaylistGenre[]>([]);
   const [stalkerGenreId, setStalkerGenreId] = useState<string>("");
   const [stalkerChannels, setStalkerChannels] = useState<StalkerPlaylistChannel[]>([]);
   const [stalkerSearch, setStalkerSearch] = useState<string>("");
   const [stalkerGenreSearch, setStalkerGenreSearch] = useState<string>("");
-  const [stalkerPage, setStalkerPage] = useState<number>(0);
-  const [stalkerHasMore, setStalkerHasMore] = useState<boolean>(false);
 
   const [xtreamSearchDebounced, setXtreamSearchDebounced] = useState<string>("");
   const [stalkerSearchDebounced, setStalkerSearchDebounced] = useState<string>("");
@@ -155,14 +169,97 @@ export default function HomePage() {
       const raw = rawV2 || rawV1;
       if (!raw) return;
       const parsed = JSON.parse(raw);
-      if (parsed?.mode) setMode(parsed.mode);
-      if (parsed?.runMode) setRunMode(parsed.runMode);
-      if (parsed?.xtreamSingle) setXtreamSingle(parsed.xtreamSingle);
-      if (parsed?.stalkerSingle) setStalkerSingle(parsed.stalkerSingle);
-      if (parsed?.xtreamBulk) setXtreamBulk(parsed.xtreamBulk);
-      if (parsed?.stalkerBulk) setStalkerBulk(parsed.stalkerBulk);
-      if (parsed?.singleResult) setSingleResult(parsed.singleResult);
-      if (parsed?.bulkResults) setBulkResults(parsed.bulkResults);
+
+      const p = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+
+      const m = p["mode"];
+      if (m === "xtream" || m === "stalker") setMode(m);
+
+      const rm = p["runMode"];
+      if (rm === "single" || rm === "bulk") setRunMode(rm);
+
+      const xs = p["xtreamSingle"];
+      if (typeof xs === "object" && xs !== null) {
+        const o = xs as Record<string, unknown>;
+        setXtreamSingle({
+          url: typeof o["url"] === "string" ? o["url"] : "",
+          username: typeof o["username"] === "string" ? o["username"] : "",
+          password: typeof o["password"] === "string" ? o["password"] : "",
+        });
+      }
+
+      const ss = p["stalkerSingle"];
+      if (typeof ss === "object" && ss !== null) {
+        const o = ss as Record<string, unknown>;
+        setStalkerSingle({
+          url: typeof o["url"] === "string" ? o["url"] : "",
+          mac: typeof o["mac"] === "string" ? o["mac"] : "",
+        });
+      }
+
+      const xb = p["xtreamBulk"];
+      if (typeof xb === "object" && xb !== null) {
+        const o = xb as Record<string, unknown>;
+        setXtreamBulk({ lines: typeof o["lines"] === "string" ? o["lines"] : "" });
+      }
+
+      const sb = p["stalkerBulk"];
+      if (typeof sb === "object" && sb !== null) {
+        const o = sb as Record<string, unknown>;
+        setStalkerBulk({
+          url: typeof o["url"] === "string" ? o["url"] : "",
+          macs: typeof o["macs"] === "string" ? o["macs"] : "",
+        });
+      }
+
+      const sr = p["singleResult"];
+      if (typeof sr === "object" && sr !== null) {
+        const o = sr as Record<string, unknown>;
+        const ok = o["ok"] === true;
+        setSingleResult({
+          ok,
+          error: typeof o["error"] === "string" ? o["error"] : "",
+          expiryDate: typeof o["expiryDate"] === "string" ? o["expiryDate"] : "",
+          expiryTs: typeof o["expiryTs"] === "number" ? o["expiryTs"] : undefined,
+          maxConnections: typeof o["maxConnections"] === "string" ? o["maxConnections"] : "",
+          activeConnections: typeof o["activeConnections"] === "string" ? o["activeConnections"] : undefined,
+          realUrl: typeof o["realUrl"] === "string" ? o["realUrl"] : "",
+          port: typeof o["port"] === "string" ? o["port"] : "",
+          timezone: typeof o["timezone"] === "string" ? o["timezone"] : "",
+          portalIp: typeof o["portalIp"] === "string" ? o["portalIp"] : undefined,
+          channels: typeof o["channels"] === "string" ? o["channels"] : undefined,
+        });
+      }
+
+      const br = p["bulkResults"];
+      if (Array.isArray(br)) {
+        const next: BulkRowResult[] = [];
+        for (const item of br) {
+          if (typeof item !== "object" || item === null) continue;
+          const o = item as Record<string, unknown>;
+          const resultRaw = o["result"];
+          if (typeof resultRaw !== "object" || resultRaw === null) continue;
+          const r = resultRaw as Record<string, unknown>;
+          next.push({
+            lineNumber: typeof o["lineNumber"] === "number" ? o["lineNumber"] : undefined,
+            input: typeof o["input"] === "string" ? o["input"] : "",
+            result: {
+              ok: r["ok"] === true,
+              error: typeof r["error"] === "string" ? r["error"] : "",
+              expiryDate: typeof r["expiryDate"] === "string" ? r["expiryDate"] : "",
+              expiryTs: typeof r["expiryTs"] === "number" ? r["expiryTs"] : undefined,
+              maxConnections: typeof r["maxConnections"] === "string" ? r["maxConnections"] : "",
+              activeConnections: typeof r["activeConnections"] === "string" ? r["activeConnections"] : undefined,
+              realUrl: typeof r["realUrl"] === "string" ? r["realUrl"] : "",
+              port: typeof r["port"] === "string" ? r["port"] : "",
+              timezone: typeof r["timezone"] === "string" ? r["timezone"] : "",
+              portalIp: typeof r["portalIp"] === "string" ? r["portalIp"] : undefined,
+              channels: typeof r["channels"] === "string" ? r["channels"] : undefined,
+            },
+          });
+        }
+        setBulkResults(next);
+      }
 
       // Best-effort migration: if we loaded v1, immediately save into v2.
       if (rawV1) {
@@ -181,14 +278,6 @@ export default function HomePage() {
     const raw = (logo || "").trim();
     if (!raw) return "";
     return `/api/image?client=1&url=${encodeURIComponent(raw)}`;
-  }
-
-  function clearResults() {
-    setError("");
-    setSingleResult(emptyResult());
-    setBulkResults([]);
-    setBulkTotal(0);
-    setBulkDone(0);
   }
 
   function stopBulk() {
@@ -377,19 +466,21 @@ export default function HomePage() {
   }, [bulkResults, bulkSort]);
 
   function toggleBulkSort(key: BulkSortKey) {
-    setBulkSort((cur) => {
-      const defaultDir: BulkSortDir = key === "expiry" ? "desc" : "asc";
-      const oppositeDir: BulkSortDir = defaultDir === "asc" ? "desc" : "asc";
+    startTransition(() => {
+      setBulkSort((cur) => {
+        const defaultDir: BulkSortDir = key === "expiry" ? "desc" : "asc";
+        const oppositeDir: BulkSortDir = defaultDir === "asc" ? "desc" : "asc";
 
-      // none -> default
-      if (!cur) return { key, dir: defaultDir };
+        // none -> default
+        if (!cur) return { key, dir: defaultDir };
 
-      // different key -> default
-      if (cur.key !== key) return { key, dir: defaultDir };
+        // different key -> default
+        if (cur.key !== key) return { key, dir: defaultDir };
 
-      // same key: default -> opposite -> none
-      if (cur.dir === defaultDir) return { key, dir: oppositeDir };
-      return null;
+        // same key: default -> opposite -> none
+        if (cur.dir === defaultDir) return { key, dir: oppositeDir };
+        return null;
+      });
     });
   }
 
@@ -404,11 +495,33 @@ export default function HomePage() {
     return xtreamChannels.filter((c) => c.name.toLowerCase().includes(q));
   }, [xtreamChannels, xtreamSearchDebounced]);
 
+  const sortedXtreamChannels = useMemo(() => {
+    const dir = xtreamChannelSortDir === "asc" ? 1 : -1;
+    const next = filteredXtreamChannels.slice();
+    next.sort((a, b) => {
+      const aa = xtreamChannelSort === "id" ? a.id : a.name;
+      const bb = xtreamChannelSort === "id" ? b.id : b.name;
+      return aa.localeCompare(bb) * dir;
+    });
+    return next;
+  }, [filteredXtreamChannels, xtreamChannelSort, xtreamChannelSortDir]);
+
   const filteredStalkerChannels = useMemo(() => {
     const q = stalkerSearchDebounced.trim().toLowerCase();
     if (!q) return stalkerChannels;
     return stalkerChannels.filter((c) => c.name.toLowerCase().includes(q));
   }, [stalkerChannels, stalkerSearchDebounced]);
+
+  const sortedStalkerChannels = useMemo(() => {
+    const dir = stalkerChannelSortDir === "asc" ? 1 : -1;
+    const next = filteredStalkerChannels.slice();
+    next.sort((a, b) => {
+      const aa = stalkerChannelSort === "id" ? a.id : a.name;
+      const bb = stalkerChannelSort === "id" ? b.id : b.name;
+      return aa.localeCompare(bb) * dir;
+    });
+    return next;
+  }, [filteredStalkerChannels, stalkerChannelSort, stalkerChannelSortDir]);
 
   const filteredXtreamCats = useMemo(() => {
     const q = xtreamCatSearch.trim().toLowerCase();
@@ -477,6 +590,7 @@ export default function HomePage() {
   }, [stalkerSearch]);
 
   const resetPlaylistState = useCallback(() => {
+    setPlaylistBusy(false);
     setPlaylistError("");
     setXtreamCats([]);
     setXtreamCatId("");
@@ -484,19 +598,24 @@ export default function HomePage() {
     setXtreamSearch("");
     setXtreamSearchDebounced("");
     setXtreamCatSearch("");
+    setCopiedXtreamStreamId("");
     setStalkerGenres([]);
-    setStalkerGenreId("");
     setStalkerChannels([]);
+    setStalkerGenreId("");
     setStalkerSearch("");
     setStalkerSearchDebounced("");
     setStalkerGenreSearch("");
-    setStalkerPage(0);
-    setStalkerHasMore(false);
   }, []);
 
   useEffect(() => {
     resetPlaylistState();
   }, [mode, runMode, resetPlaylistState]);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(""), 1800);
+  }, []);
 
   async function loadXtreamCategories() {
     // Loads Xtream live categories. If we have a remembered categoryId for this server,
@@ -601,8 +720,7 @@ export default function HomePage() {
         const last = prefs.stalker?.[key]?.lastGenreId;
         if (last && genres.some((g) => g.id === last)) {
           setStalkerGenreId(last);
-          setStalkerPage(0);
-          await loadStalkerChannels(last, 0, false);
+          await loadStalkerChannels(last);
         }
       }
     } catch (e: unknown) {
@@ -612,9 +730,9 @@ export default function HomePage() {
     }
   }
 
-  async function loadStalkerChannels(genreId: string, page: number, append: boolean) {
-    // Loads paginated Stalker channels.
-    // Stalker portals can have huge lists; we keep pagination and a debounced search UI.
+  async function loadStalkerChannels(genreId: string) {
+    // Loads Stalker channels for a genre.
+    // The API consolidates pagination server-side so the UI can show a single long list.
     setPlaylistError("");
     setPlaylistBusy(true);
     try {
@@ -624,24 +742,22 @@ export default function HomePage() {
       const res = await fetch("/api/playlist/stalker", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
-        body: JSON.stringify({ url, mac, genreId, page }),
+        body: JSON.stringify({ url, mac, genreId, all: true }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json?.error || "Failed to load channels.");
 
       const chans = Array.isArray(json.channels) ? (json.channels as StalkerPlaylistChannel[]) : [];
-      setStalkerChannels((prev) => (append ? prev.concat(chans) : chans));
-      if (!append) setStalkerSearch("");
-      setStalkerPage(Number(json.page ?? page) || 0);
-      setStalkerHasMore(Boolean(json.hasMore));
+      startTransition(() => {
+        setStalkerChannels(chans);
+        setStalkerSearch("");
+      });
 
-      if (!append) {
-        const key = stalkerPrefKey();
-        if (key) {
-          const prefs = readPlaylistPrefs();
-          prefs.stalker[key] = { ...(prefs.stalker[key] || {}), lastGenreId: genreId };
-          writePlaylistPrefs(prefs);
-        }
+      const key = stalkerPrefKey();
+      if (key) {
+        const prefs = readPlaylistPrefs();
+        prefs.stalker[key] = { ...(prefs.stalker[key] || {}), lastGenreId: genreId };
+        writePlaylistPrefs(prefs);
       }
     } catch (e: unknown) {
       setPlaylistError(errMsg(e));
@@ -768,6 +884,7 @@ export default function HomePage() {
           expiryDate: json.expiryDate,
           expiryTs: typeof json.expiryTs === "number" ? json.expiryTs : undefined,
           maxConnections: String(json.maxConnections ?? "N/A"),
+          activeConnections: String(json.activeConnections ?? "N/A"),
           realUrl: String(json.realUrl ?? "N/A"),
           port: String(json.port ?? "N/A"),
           timezone: String(json.timezone ?? "N/A"),
@@ -1119,17 +1236,21 @@ export default function HomePage() {
   }
 
   function resetAll() {
-    setError("");
-    setSingleResult(emptyResult());
-    setBulkResults([]);
-    setBulkTotal(0);
-    setBulkDone(0);
-    setPlaylistBusy(false);
-    resetPlaylistState();
-    setXtreamSingle({ url: "", username: "", password: "" });
-    setStalkerSingle({ url: "", mac: "" });
-    setXtreamBulk({ lines: "" });
-    setStalkerBulk({ url: "", macs: "" });
+    startTransition(() => {
+      setError("");
+      setSingleResult(emptyResult());
+      setBulkResults([]);
+      setBulkTotal(0);
+      setBulkDone(0);
+      setPlaylistBusy(false);
+      resetPlaylistState();
+      setXtreamSingle({ url: "", username: "", password: "" });
+      setStalkerSingle({ url: "", mac: "" });
+      setXtreamBulk({ lines: "" });
+      setStalkerBulk({ url: "", macs: "" });
+      setXtreamPlaylistTab("list");
+      setStalkerPlaylistTab("list");
+    });
     try {
       localStorage.removeItem(LS_KEY_V2);
       localStorage.removeItem(LS_KEY_V1);
@@ -1156,12 +1277,18 @@ export default function HomePage() {
             className="brandImg brandImgDesktop"
             src="https://i.ibb.co/0p8g1MYC/Zone-NEW-ICON-1000-x-320-px.png"
             alt="ZONE NEW"
+            width={1000}
+            height={320}
+            decoding="async"
           />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             className="brandImg brandImgMobile"
             src="https://i.ibb.co/5hqtGGDW/Zone-NEW-ICON-1024-x-1024-px.png"
             alt="ZONE NEW"
+            width={1024}
+            height={1024}
+            decoding="async"
           />
         </div>
       </div>
@@ -1176,32 +1303,49 @@ export default function HomePage() {
         <span className="badge">{activeTitle}</span>
       </div>
 
-      <div className="panel">
-        <div className="controls">
-          <div className="segment" aria-label="Mode">
-            <button data-active={mode === "xtream"} onClick={() => setMode("xtream")} disabled={busy}>
-              Xtream
-            </button>
-            <button data-active={mode === "stalker"} onClick={() => setMode("stalker")} disabled={busy}>
-              Stalker (MAC)
-            </button>
+      <div className="panel checkerPanel" data-mode={mode}>
+        <div className="checkerTop">
+          <div className="checkerSelectors">
+            <div className="segmented" aria-label="Provider" data-active={mode === "xtream" ? "left" : "right"}>
+              <span className="segmentedIndicator" aria-hidden="true" />
+              <button
+                type="button"
+                data-active={mode === "xtream"}
+                onClick={() => {
+                  setMode("xtream");
+                  setXtreamPlaylistTab("list");
+                }}
+                disabled={busy}
+              >
+                Xtream
+              </button>
+              <button
+                type="button"
+                data-active={mode === "stalker"}
+                onClick={() => {
+                  setMode("stalker");
+                  setStalkerPlaylistTab("list");
+                }}
+                disabled={busy}
+              >
+                Stalker (MAC)
+              </button>
+            </div>
+
+            <div className="segmented" aria-label="Run mode" data-active={runMode === "single" ? "left" : "right"}>
+              <span className="segmentedIndicator" aria-hidden="true" />
+              <button type="button" data-active={runMode === "single"} onClick={() => setRunMode("single")} disabled={busy}>
+                Single
+              </button>
+              <button type="button" data-active={runMode === "bulk"} onClick={() => setRunMode("bulk")} disabled={busy}>
+                Bulk
+              </button>
+            </div>
           </div>
 
-          <div className="segment" aria-label="Run mode">
-            <button data-active={runMode === "single"} onClick={() => setRunMode("single")} disabled={busy}>
-              Single
-            </button>
-            <button data-active={runMode === "bulk"} onClick={() => setRunMode("bulk")} disabled={busy}>
-              Bulk
-            </button>
-          </div>
-
-          <div style={{ display: "flex", gap: 10 }}>
+          <div className="checkerActions">
             <button className="btn" onClick={copyAll} disabled={busy}>
               Copy
-            </button>
-            <button className="btn" onClick={clearResults} disabled={busy}>
-              Clear Results
             </button>
             <button className="btn danger" onClick={resetAll} disabled={busy}>
               Reset
@@ -1211,123 +1355,123 @@ export default function HomePage() {
 
         <div style={{ height: 12 }} />
 
-        {mode === "xtream" && runMode === "single" && (
-          <div className="row two">
-            <div>
-              <label>URL</label>
-              <input value={xtreamSingle.url} onChange={(e) => setXtreamSingle({ ...xtreamSingle, url: e.target.value })} placeholder="http://domain.com:8080" />
-              {xtreamSingleErrors.length > 0 ? <div className="fieldError">{xtreamSingleErrors[0]}</div> : null}
-            </div>
-            <div />
-            <div>
-              <label>USERNAME</label>
-              <input value={xtreamSingle.username} onChange={(e) => setXtreamSingle({ ...xtreamSingle, username: e.target.value })} placeholder="username" />
-              {xtreamSingleErrors.includes("Username is required.") ? <div className="fieldError">Username is required.</div> : null}
-            </div>
-            <div>
-              <label>PASSWORD</label>
-              <input value={xtreamSingle.password} onChange={(e) => setXtreamSingle({ ...xtreamSingle, password: e.target.value })} placeholder="password" />
-              {xtreamSingleErrors.includes("Password is required.") ? <div className="fieldError">Password is required.</div> : null}
-            </div>
-          </div>
-        )}
+            {mode === "xtream" && runMode === "single" && (
+              <div className="row two">
+                <div>
+                  <label>URL</label>
+                  <input value={xtreamSingle.url} onChange={(e) => setXtreamSingle({ ...xtreamSingle, url: e.target.value })} placeholder="http://domain.com:8080" />
+                  {xtreamSingleErrors.length > 0 ? <div className="fieldError">{xtreamSingleErrors[0]}</div> : null}
+                </div>
+                <div />
+                <div>
+                  <label>USERNAME</label>
+                  <input value={xtreamSingle.username} onChange={(e) => setXtreamSingle({ ...xtreamSingle, username: e.target.value })} placeholder="username" />
+                  {xtreamSingleErrors.includes("Username is required.") ? <div className="fieldError">Username is required.</div> : null}
+                </div>
+                <div>
+                  <label>PASSWORD</label>
+                  <input value={xtreamSingle.password} onChange={(e) => setXtreamSingle({ ...xtreamSingle, password: e.target.value })} placeholder="password" />
+                  {xtreamSingleErrors.includes("Password is required.") ? <div className="fieldError">Password is required.</div> : null}
+                </div>
+              </div>
+            )}
 
-        {mode === "stalker" && runMode === "single" && (
-          <div className="row two">
-            <div>
-              <label>URL</label>
-              <input value={stalkerSingle.url} onChange={(e) => setStalkerSingle({ ...stalkerSingle, url: e.target.value })} placeholder="http://domain.com:8080" />
-              {stalkerSingleErrors.length > 0 ? <div className="fieldError">{stalkerSingleErrors[0]}</div> : null}
-            </div>
-            <div />
-            <div>
-              <label>MAC ADDRESS</label>
-              <input value={stalkerSingle.mac} onChange={(e) => setStalkerSingle({ ...stalkerSingle, mac: e.target.value })} placeholder="00:1A:2B:3C:4D:5E" />
-            </div>
-            <div />
-          </div>
-        )}
+            {mode === "stalker" && runMode === "single" && (
+              <div className="row two">
+                <div>
+                  <label>URL</label>
+                  <input value={stalkerSingle.url} onChange={(e) => setStalkerSingle({ ...stalkerSingle, url: e.target.value })} placeholder="http://domain.com:8080" />
+                  {stalkerSingleErrors.length > 0 ? <div className="fieldError">{stalkerSingleErrors[0]}</div> : null}
+                </div>
+                <div />
+                <div>
+                  <label>MAC ADDRESS</label>
+                  <input value={stalkerSingle.mac} onChange={(e) => setStalkerSingle({ ...stalkerSingle, mac: e.target.value })} placeholder="00:1A:2B:3C:4D:5E" />
+                </div>
+                <div />
+              </div>
+            )}
 
-        {mode === "xtream" && runMode === "bulk" && (
-          <div className="row">
-            <div>
-              <label>BULK XTREAM URLS (one per line)</label>
-              <textarea
-                className="bulkTextarea"
-                value={xtreamBulk.lines}
-                onChange={(e) => setXtreamBulk({ ...xtreamBulk, lines: e.target.value })}
-                placeholder={
-                  "http://domain.com:8080/get.php?username=user1&password=pass1&type=m3u_plus\n" +
-                  "http://domain2.com:8080/get.php?username=user2&password=pass2&type=m3u_plus"
-                }
-              />
-            </div>
-            <div className="notice">
-              Max 50 lines per bulk run (safety). Lines: {xtreamBulkSummary.total} • Valid: {xtreamBulkSummary.valid} • Invalid: {xtreamBulkSummary.invalid}
-            </div>
-          </div>
-        )}
+            {mode === "xtream" && runMode === "bulk" && (
+              <div className="row">
+                <div>
+                  <label>BULK XTREAM URLS (one per line)</label>
+                  <textarea
+                    className="bulkTextarea"
+                    value={xtreamBulk.lines}
+                    onChange={(e) => setXtreamBulk({ ...xtreamBulk, lines: e.target.value })}
+                    placeholder={
+                      "http://domain.com:8080/get.php?username=user1&password=pass1&type=m3u_plus\n" +
+                      "http://domain2.com:8080/get.php?username=user2&password=pass2&type=m3u_plus"
+                    }
+                  />
+                </div>
+                <div className="notice">
+                  Max 50 lines per bulk run (safety). Lines: {xtreamBulkSummary.total} • Valid: {xtreamBulkSummary.valid} • Invalid: {xtreamBulkSummary.invalid}
+                </div>
+              </div>
+            )}
 
-        {mode === "stalker" && runMode === "bulk" && (
-          <div className="row">
-            <div>
-              <label>URL</label>
-              <input value={stalkerBulk.url} onChange={(e) => setStalkerBulk({ ...stalkerBulk, url: e.target.value })} placeholder="http://domain.com:8080" />
-              {stalkerBulkUrlError ? <div className="fieldError">{stalkerBulkUrlError}</div> : null}
-            </div>
-            <div>
-              <label>BULK MAC ADDRESSES (one per line)</label>
-              <textarea
-                className="bulkTextarea"
-                value={stalkerBulk.macs}
-                onChange={(e) => setStalkerBulk({ ...stalkerBulk, macs: e.target.value })}
-                placeholder={`00:1A:2B:3C:4D:5E
+            {mode === "stalker" && runMode === "bulk" && (
+              <div className="row">
+                <div>
+                  <label>URL</label>
+                  <input value={stalkerBulk.url} onChange={(e) => setStalkerBulk({ ...stalkerBulk, url: e.target.value })} placeholder="http://domain.com:8080" />
+                  {stalkerBulkUrlError ? <div className="fieldError">{stalkerBulkUrlError}</div> : null}
+                </div>
+                <div>
+                  <label>BULK MAC ADDRESSES (one per line)</label>
+                  <textarea
+                    className="bulkTextarea"
+                    value={stalkerBulk.macs}
+                    onChange={(e) => setStalkerBulk({ ...stalkerBulk, macs: e.target.value })}
+                    placeholder={`00:1A:2B:3C:4D:5E
 00:11:22:33:44:55`}
-              />
-            </div>
-            <div className="notice">
-              Max 50 lines per bulk run (safety). Lines: {stalkerBulkSummary.total} • Valid: {stalkerBulkSummary.valid} • Invalid: {stalkerBulkSummary.invalid}
-            </div>
-          </div>
-        )}
+                  />
+                </div>
+                <div className="notice">
+                  Max 50 lines per bulk run (safety). Lines: {stalkerBulkSummary.total} • Valid: {stalkerBulkSummary.valid} • Invalid: {stalkerBulkSummary.invalid}
+                </div>
+              </div>
+            )}
 
-        <div style={{ height: 12 }} />
+            <div style={{ height: 12 }} />
 
-        <div className="controls">
-          {runMode === "single" ? (
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <button
-                className="btn primary"
-                onClick={runSingle}
-                disabled={
-                  busy ||
-                  (mode === "xtream" ? xtreamSingleErrors.length > 0 : stalkerSingleErrors.length > 0)
-                }
-              >
-                {busy ? "Checking..." : "Check"}
-              </button>
+            <div className="controls">
+              {runMode === "single" ? (
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    className="btn primary"
+                    onClick={runSingle}
+                    disabled={
+                      busy ||
+                      (mode === "xtream" ? xtreamSingleErrors.length > 0 : stalkerSingleErrors.length > 0)
+                    }
+                  >
+                    {busy ? "Checking..." : "Check"}
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button className="btn primary" onClick={runBulk} disabled={busy || Boolean(bulkDisabledReason)}>
+                    {busy ? "Checking..." : "Check (Bulk)"}
+                  </button>
+                  <button className="btn danger" onClick={stopBulk} disabled={!busy}>
+                    Stop
+                  </button>
+                  {bulkDisabledReason ? <div className="fieldError">{bulkDisabledReason}</div> : null}
+                </div>
+              )}
             </div>
-          ) : (
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <button className="btn primary" onClick={runBulk} disabled={busy || Boolean(bulkDisabledReason)}>
-                {busy ? "Checking..." : "Check (Bulk)"}
-              </button>
-              <button className="btn danger" onClick={stopBulk} disabled={!busy}>
-                Stop
-              </button>
-              {bulkDisabledReason ? <div className="fieldError">{bulkDisabledReason}</div> : null}
-            </div>
-          )}
-        </div>
 
-        {runMode === "bulk" && (bulkTotal > 0 || busy) ? (
-          <div className="progressRow">
-            <div className="progressBar" aria-label="Progress">
-              <div className="progressFill" style={{ width: `${bulkTotal ? Math.min(100, Math.round((bulkDone / bulkTotal) * 100)) : 0}%` }} />
-            </div>
-            <div className="small">{bulkDone}/{bulkTotal || 0}</div>
-          </div>
-        ) : null}
+            {runMode === "bulk" && (bulkTotal > 0 || busy) ? (
+              <div className="progressRow">
+                <div className="progressBar" aria-label="Progress">
+                  <div className="progressFill" style={{ width: `${bulkTotal ? Math.min(100, Math.round((bulkDone / bulkTotal) * 100)) : 0}%` }} />
+                </div>
+                <div className="small">{bulkDone}/{bulkTotal || 0}</div>
+              </div>
+            ) : null}
 
         {error ? <div style={{ marginTop: 12 }} className="error">{error}</div> : null}
         {canShowSingle && playlistError ? <div style={{ marginTop: 12 }} className="error">{playlistError}</div> : null}
@@ -1339,6 +1483,7 @@ export default function HomePage() {
         <div className="panel">
           <ResultKV label="EXPIRY DATE" value={singleResult.expiryDate} />
           {mode === "xtream" ? <ResultKV label="MAX CONNECTIONS" value={singleResult.maxConnections} /> : null}
+          {mode === "xtream" ? <ResultKV label="ACTIVE CONNECTIONS" value={singleResult.activeConnections || "N/A"} /> : null}
           <ResultKV label="REAL URL" value={singleResult.realUrl} />
           <ResultKV label="PORT" value={singleResult.port} />
           <ResultKV label="TIMEZONE" value={singleResult.timezone} />
@@ -1357,8 +1502,17 @@ export default function HomePage() {
             <div className="small">{playlistBusy ? "Loading..." : ""}</div>
           </div>
 
+          <div className="playlistTabs" aria-label="Playlist panes">
+            <button type="button" className="playlistTab" data-active={xtreamPlaylistTab === "list"} onClick={() => setXtreamPlaylistTab("list")}>
+              Categories
+            </button>
+            <button type="button" className="playlistTab" data-active={xtreamPlaylistTab === "channels"} onClick={() => setXtreamPlaylistTab("channels")}>
+              Channels
+            </button>
+          </div>
+
           <div className="playlistGrid">
-            <div className="playlistPane">
+            <div className="playlistPane" data-mobile-hidden={xtreamPlaylistTab !== "list" ? "true" : "false"}>
               <div className="playlistPaneHeader">
                 <div className="playlistPaneTitle">Categories</div>
                 <div className="small">{xtreamCats.length}</div>
@@ -1397,7 +1551,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="playlistPane">
+            <div className="playlistPane" data-mobile-hidden={xtreamPlaylistTab !== "channels" ? "true" : "false"}>
               <div className="playlistPaneHeader">
                 <div className="playlistPaneTitle">Channels</div>
                 <div className="playlistPaneActions">
@@ -1418,12 +1572,33 @@ export default function HomePage() {
                 </div>
               </div>
               <div className="playlistControls">
-                <input
-                  value={xtreamSearch}
-                  onChange={(e) => setXtreamSearch(e.target.value)}
-                  placeholder={xtreamCatId ? "Search channels..." : "Select a category first"}
-                  disabled={!xtreamCatId}
-                />
+                <div className="playlistControlsRow">
+                  <input
+                    value={xtreamSearch}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      startTransition(() => setXtreamSearch(v));
+                    }}
+                    placeholder={xtreamCatId ? "Search channels..." : "Select a category first"}
+                    disabled={!xtreamCatId}
+                  />
+                  <select
+                    className="miniSelect"
+                    value={`${xtreamChannelSort}:${xtreamChannelSortDir}`}
+                    onChange={(e) => {
+                      const [k, d] = String(e.target.value).split(":");
+                      if (k === "name" || k === "id") setXtreamChannelSort(k);
+                      if (d === "asc" || d === "desc") setXtreamChannelSortDir(d);
+                    }}
+                    disabled={!xtreamCatId}
+                    aria-label="Sort channels"
+                  >
+                    <option value="name:asc">Name (A→Z)</option>
+                    <option value="name:desc">Name (Z→A)</option>
+                    <option value="id:asc">ID (Asc)</option>
+                    <option value="id:desc">ID (Desc)</option>
+                  </select>
+                </div>
               </div>
 
               {!xtreamCatId ? (
@@ -1435,16 +1610,16 @@ export default function HomePage() {
               {xtreamCatId ? (
                 <VirtualList
                   className="scrollArea"
-                  items={filteredXtreamChannels}
+                  items={sortedXtreamChannels}
                   itemHeight={64}
                   height={xtreamListHeight}
-                  render={(ch) => (
-                    <div key={(ch as any).id} className="channelRow">
+                  render={(ch: XtreamPlaylistChannel) => (
+                    <div key={ch.id} className="channelRow channelRowWithAction">
                       <div className="channelLogo">
-                        {(ch as any).logo ? (
+                        {ch.logo ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
-                            src={logoSrc((ch as any).logo)}
+                            src={logoSrc(ch.logo)}
                             alt=""
                             width={36}
                             height={36}
@@ -1456,8 +1631,84 @@ export default function HomePage() {
                           />
                         ) : null}
                       </div>
-                      <div className="channelName" title={(ch as any).name}>
-                        {(ch as any).name}
+                      <div className="channelName" title={ch.name}>
+                        {ch.name}
+                      </div>
+                      <div className="channelActions">
+                        <div
+                          className="iconBtnWrap"
+                          onMouseEnter={() => {
+                            try {
+                              const origin = normalizeUrl(xtreamSingle.url);
+                              const username = xtreamSingle.username.trim();
+                              const password = xtreamSingle.password.trim();
+                              const streamId = ch.id.trim();
+                              if (!origin || !username || !password || !streamId) return;
+                              const streamUrl = `${origin}/live/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(streamId)}.ts`;
+                              setXtreamHoverUrl(streamUrl);
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                          onMouseLeave={() => setXtreamHoverUrl("")}
+                        >
+                          <button
+                            type="button"
+                            className="iconBtn vlc"
+                            data-copied={copiedXtreamStreamId === ch.id ? "true" : "false"}
+                            data-tooltip={xtreamHoverUrl || ""}
+                            onClick={async () => {
+                              try {
+                                const origin = normalizeUrl(xtreamSingle.url);
+                                const username = xtreamSingle.username.trim();
+                                const password = xtreamSingle.password.trim();
+                                const streamId = ch.id.trim();
+                                if (!origin || !username || !password || !streamId) throw new Error("Missing URL/username/password or stream id.");
+
+                                const streamUrl = `${origin}/live/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(streamId)}.ts`;
+
+                                if (navigator.clipboard?.writeText) {
+                                  await navigator.clipboard.writeText(streamUrl);
+                                } else {
+                                  const ta = document.createElement("textarea");
+                                  ta.value = streamUrl;
+                                  ta.style.position = "fixed";
+                                  ta.style.left = "-9999px";
+                                  document.body.appendChild(ta);
+                                  ta.focus();
+                                  ta.select();
+                                  document.execCommand("copy");
+                                  document.body.removeChild(ta);
+                                }
+
+                                setCopiedXtreamStreamId(streamId);
+                                showToast("Copied Stream Link");
+                                window.setTimeout(() => {
+                                  setCopiedXtreamStreamId((cur) => (cur === streamId ? "" : cur));
+                                }, 1500);
+                              } catch (e: unknown) {
+                                setError(errMsg(e));
+                              }
+                            }}
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path
+                                d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.43"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                              <path
+                                d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07L12.5 19.57"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1478,8 +1729,17 @@ export default function HomePage() {
             <div className="small">{playlistBusy ? "Loading..." : ""}</div>
           </div>
 
+          <div className="playlistTabs" aria-label="Playlist panes">
+            <button type="button" className="playlistTab" data-active={stalkerPlaylistTab === "list"} onClick={() => setStalkerPlaylistTab("list")}>
+              Genres
+            </button>
+            <button type="button" className="playlistTab" data-active={stalkerPlaylistTab === "channels"} onClick={() => setStalkerPlaylistTab("channels")}>
+              Channels
+            </button>
+          </div>
+
           <div className="playlistGrid">
-            <div className="playlistPane">
+            <div className="playlistPane" data-mobile-hidden={stalkerPlaylistTab !== "list" ? "true" : "false"}>
               <div className="playlistPaneHeader">
                 <div className="playlistPaneTitle">Genres</div>
                 <div className="small">{stalkerGenres.length}</div>
@@ -1487,12 +1747,15 @@ export default function HomePage() {
               <div className="playlistControls">
                 <input
                   value={stalkerGenreSearch}
-                  onChange={(e) => setStalkerGenreSearch(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    startTransition(() => setStalkerGenreSearch(v));
+                  }}
                   placeholder={stalkerGenres.length ? "Search genres..." : "Genres will appear after check"}
                   disabled={!stalkerGenres.length}
                 />
               </div>
-              <div className="scrollArea padded">
+              <div className="scrollArea padded" style={{ height: xtreamListHeight }}>
                 {stalkerGenres.length === 0 ? (
                   <div className="notice">
                     {playlistBusy ? "Loading genres..." : singleResult.ok ? "Checked OK — loading genres..." : "Run Check to load genres."}
@@ -1506,8 +1769,7 @@ export default function HomePage() {
                       data-active={stalkerGenreId === g.id}
                       onClick={() => {
                         setStalkerGenreId(g.id);
-                        setStalkerPage(0);
-                        loadStalkerChannels(g.id, 0, false);
+                        loadStalkerChannels(g.id);
                       }}
                       disabled={playlistBusy}
                       title={g.name}
@@ -1519,7 +1781,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="playlistPane">
+            <div className="playlistPane" data-mobile-hidden={stalkerPlaylistTab !== "channels" ? "true" : "false"}>
               <div className="playlistPaneHeader">
                 <div className="playlistPaneTitle">Channels</div>
                 <div className="playlistPaneActions">
@@ -1530,8 +1792,6 @@ export default function HomePage() {
                         setStalkerGenreId("");
                         setStalkerChannels([]);
                         setStalkerSearch("");
-                        setStalkerPage(0);
-                        setStalkerHasMore(false);
                       }}
                       disabled={playlistBusy}
                     >
@@ -1542,12 +1802,33 @@ export default function HomePage() {
                 </div>
               </div>
               <div className="playlistControls">
-                <input
-                  value={stalkerSearch}
-                  onChange={(e) => setStalkerSearch(e.target.value)}
-                  placeholder={stalkerGenreId ? "Search channels..." : "Select a genre first"}
-                  disabled={!stalkerGenreId}
-                />
+                <div className="playlistControlsRow">
+                  <input
+                    value={stalkerSearch}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      startTransition(() => setStalkerSearch(v));
+                    }}
+                    placeholder={stalkerGenreId ? "Search channels..." : "Select a genre first"}
+                    disabled={!stalkerGenreId}
+                  />
+                  <select
+                    className="miniSelect"
+                    value={`${stalkerChannelSort}:${stalkerChannelSortDir}`}
+                    onChange={(e) => {
+                      const [k, d] = String(e.target.value).split(":");
+                      if (k === "name" || k === "id") setStalkerChannelSort(k);
+                      if (d === "asc" || d === "desc") setStalkerChannelSortDir(d);
+                    }}
+                    disabled={!stalkerGenreId}
+                    aria-label="Sort channels"
+                  >
+                    <option value="name:asc">Name (A→Z)</option>
+                    <option value="name:desc">Name (Z→A)</option>
+                    <option value="id:asc">ID (Asc)</option>
+                    <option value="id:desc">ID (Desc)</option>
+                  </select>
+                </div>
               </div>
 
               {!stalkerGenreId ? (
@@ -1559,16 +1840,16 @@ export default function HomePage() {
               {stalkerGenreId ? (
                 <VirtualList
                   className="scrollArea"
-                  items={filteredStalkerChannels}
+                  items={sortedStalkerChannels}
                   itemHeight={64}
-                  height={360}
-                  render={(ch) => (
-                    <div key={(ch as any).id} className="channelRow">
+                  height={xtreamListHeight}
+                  render={(ch: StalkerPlaylistChannel) => (
+                    <div key={ch.id} className="channelRow">
                       <div className="channelLogo">
-                        {(ch as any).logo ? (
+                        {ch.logo ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
-                            src={logoSrc((ch as any).logo)}
+                            src={logoSrc(ch.logo)}
                             alt=""
                             width={36}
                             height={36}
@@ -1580,32 +1861,12 @@ export default function HomePage() {
                           />
                         ) : null}
                       </div>
-                      <div className="channelName" title={(ch as any).name}>
-                        {(ch as any).name}
+                      <div className="channelName" title={ch.name}>
+                        {ch.name}
                       </div>
                     </div>
                   )}
                 />
-              ) : null}
-
-              {stalkerGenreId ? (
-                <div className="playlistFooter">
-                  <div className="small">
-                    Loaded: {stalkerChannels.length}
-                    {stalkerHasMore ? " • More available" : ""}
-                  </div>
-                  <button
-                    className="btn"
-                    disabled={!stalkerHasMore || playlistBusy}
-                    onClick={() => {
-                      const next = stalkerPage + 1;
-                      setStalkerPage(next);
-                      loadStalkerChannels(stalkerGenreId, next, true);
-                    }}
-                  >
-                    {playlistBusy ? "Loading..." : "Load more"}
-                  </button>
-                </div>
               ) : null}
             </div>
           </div>
@@ -1679,16 +1940,26 @@ export default function HomePage() {
         </div>
       ) : null}
 
-      <div style={{ height: 16 }} />
-
       <div className="footerHint">
-        <span className="footerLink">Privacy</span>
-        <span className="footerTooltip">
-          Sends URL + credentials only to your IPTV server endpoints for validation.
-          Stores last inputs/results in your browser only.
-          No playback.
-        </span>
+        <div className="footerGroup">
+          <a
+            className="footerLink"
+            href="https://github.com/iptv-org/awesome-iptv"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Resources
+          </a>
+          <span className="small">|</span>
+          <a className="footerLink" href="https://gitlab.com/jackbo987/zone-new-checker" target="_blank" rel="noreferrer">
+            GitLab
+          </a>
+        </div>
       </div>
+
+      {toast ? <div className="toast">{toast}</div> : null}
+
+      <div style={{ height: 16 }} />
     </main>
   );
 }
