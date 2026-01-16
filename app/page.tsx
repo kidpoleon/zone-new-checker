@@ -94,6 +94,10 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Unknown error.";
 }
 
+function asObj(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+}
+
 export default function HomePage() {
   const [mode, setMode] = useState<Mode>("xtream");
   const [runMode, setRunMode] = useState<RunMode>("single");
@@ -149,6 +153,26 @@ export default function HomePage() {
   const [viewportH, setViewportH] = useState<number>(0);
 
   const canShowSingle = runMode === "single";
+
+  const redirectToVerify = useCallback(() => {
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    const qp = new URLSearchParams({ returnTo });
+    window.location.assign(`/verify?${qp.toString()}`);
+  }, []);
+
+  const handleMaybeVerifyRequired = useCallback(
+    (res: Response, jsonObj: Record<string, unknown>): boolean => {
+      if (res.status === 403 && jsonObj["code"] === "human_verification_required") {
+        abortRef.current?.abort();
+        setBusy(false);
+        setPlaylistBusy(false);
+        redirectToVerify();
+        return true;
+      }
+      return false;
+    },
+    [redirectToVerify]
+  );
 
   useEffect(() => {
     const update = () => setViewportH(window.innerHeight || 0);
@@ -632,10 +656,12 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
         body: JSON.stringify({ url, username, password }),
       });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json?.error || "Failed to load categories.");
+      const json: unknown = await res.json().catch(() => ({}));
+      const obj = asObj(json);
+      if (handleMaybeVerifyRequired(res, obj)) return;
+      if (!res.ok || obj["ok"] !== true) throw new Error(typeof obj["error"] === "string" ? String(obj["error"]) : "Failed to load categories.");
 
-      const cats = Array.isArray(json.categories) ? (json.categories as XtreamPlaylistCategory[]) : [];
+      const cats = Array.isArray(obj["categories"]) ? (obj["categories"] as XtreamPlaylistCategory[]) : [];
       setXtreamCats(cats);
       setXtreamChannels([]);
       setXtreamCatId("");
@@ -671,10 +697,12 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
         body: JSON.stringify({ url, username, password, categoryId }),
       });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json?.error || "Failed to load channels.");
+      const json: unknown = await res.json().catch(() => ({}));
+      const obj = asObj(json);
+      if (handleMaybeVerifyRequired(res, obj)) return;
+      if (!res.ok || obj["ok"] !== true) throw new Error(typeof obj["error"] === "string" ? String(obj["error"]) : "Failed to load channels.");
 
-      const chans = Array.isArray(json.channels) ? (json.channels as XtreamPlaylistChannel[]) : [];
+      const chans = Array.isArray(obj["channels"]) ? (obj["channels"] as XtreamPlaylistChannel[]) : [];
       setXtreamChannels(chans);
       setXtreamSearch("");
 
@@ -705,10 +733,12 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
         body: JSON.stringify({ url, mac }),
       });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json?.error || "Failed to load genres.");
+      const json: unknown = await res.json().catch(() => ({}));
+      const obj = asObj(json);
+      if (handleMaybeVerifyRequired(res, obj)) return;
+      if (!res.ok || obj["ok"] !== true) throw new Error(typeof obj["error"] === "string" ? String(obj["error"]) : "Failed to load genres.");
 
-      const genres = Array.isArray(json.genres) ? (json.genres as StalkerPlaylistGenre[]) : [];
+      const genres = Array.isArray(obj["genres"]) ? (obj["genres"] as StalkerPlaylistGenre[]) : [];
       setStalkerGenres(genres);
       setStalkerChannels([]);
       setStalkerGenreId("");
@@ -744,10 +774,12 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
         body: JSON.stringify({ url, mac, genreId, all: true }),
       });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json?.error || "Failed to load channels.");
+      const json: unknown = await res.json().catch(() => ({}));
+      const obj = asObj(json);
+      if (handleMaybeVerifyRequired(res, obj)) return;
+      if (!res.ok || obj["ok"] !== true) throw new Error(typeof obj["error"] === "string" ? String(obj["error"]) : "Failed to load channels.");
 
-      const chans = Array.isArray(json.channels) ? (json.channels as StalkerPlaylistChannel[]) : [];
+      const chans = Array.isArray(obj["channels"]) ? (obj["channels"] as StalkerPlaylistChannel[]) : [];
       startTransition(() => {
         setStalkerChannels(chans);
         setStalkerSearch("");
@@ -876,18 +908,20 @@ export default function HomePage() {
           headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
           body: JSON.stringify({ url, username, password }),
         });
-        const json = await res.json();
-        if (!res.ok || !json.ok) throw new Error(json?.error || "Check failed.");
+        const json: unknown = await res.json().catch(() => ({}));
+        const obj = asObj(json);
+        if (handleMaybeVerifyRequired(res, obj)) return;
+        if (!res.ok || obj["ok"] !== true) throw new Error(typeof obj["error"] === "string" ? String(obj["error"]) : "Check failed.");
 
         setSingleResult({
           ok: true,
-          expiryDate: json.expiryDate,
-          expiryTs: typeof json.expiryTs === "number" ? json.expiryTs : undefined,
-          maxConnections: String(json.maxConnections ?? "N/A"),
-          activeConnections: String(json.activeConnections ?? "N/A"),
-          realUrl: String(json.realUrl ?? "N/A"),
-          port: String(json.port ?? "N/A"),
-          timezone: String(json.timezone ?? "N/A"),
+          expiryDate: String(obj["expiryDate"] ?? "N/A"),
+          expiryTs: typeof obj["expiryTs"] === "number" ? (obj["expiryTs"] as number) : undefined,
+          maxConnections: String(obj["maxConnections"] ?? "N/A"),
+          activeConnections: String(obj["activeConnections"] ?? "N/A"),
+          realUrl: String(obj["realUrl"] ?? "N/A"),
+          port: String(obj["port"] ?? "N/A"),
+          timezone: String(obj["timezone"] ?? "N/A"),
         });
 
         await loadXtreamCategories();
@@ -900,19 +934,21 @@ export default function HomePage() {
           headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
           body: JSON.stringify({ url, mac }),
         });
-        const json = await res.json();
-        if (!res.ok || !json.ok) throw new Error(json?.error || "Check failed.");
+        const json: unknown = await res.json().catch(() => ({}));
+        const obj = asObj(json);
+        if (handleMaybeVerifyRequired(res, obj)) return;
+        if (!res.ok || obj["ok"] !== true) throw new Error(typeof obj["error"] === "string" ? String(obj["error"]) : "Check failed.");
 
         setSingleResult({
           ok: true,
-          expiryDate: String(json.expiryDate ?? "N/A"),
-          expiryTs: typeof json.expiryTs === "number" ? json.expiryTs : undefined,
-          maxConnections: String(json.maxConnections ?? "N/A"),
-          realUrl: String(json.realUrl ?? "N/A"),
-          port: String(json.port ?? "N/A"),
-          timezone: String(json.timezone ?? "N/A"),
-          portalIp: String(json.portalIp ?? "N/A"),
-          channels: String(json.channels ?? "N/A"),
+          expiryDate: String(obj["expiryDate"] ?? "N/A"),
+          expiryTs: typeof obj["expiryTs"] === "number" ? (obj["expiryTs"] as number) : undefined,
+          maxConnections: String(obj["maxConnections"] ?? "N/A"),
+          realUrl: String(obj["realUrl"] ?? "N/A"),
+          port: String(obj["port"] ?? "N/A"),
+          timezone: String(obj["timezone"] ?? "N/A"),
+          portalIp: String(obj["portalIp"] ?? "N/A"),
+          channels: String(obj["channels"] ?? "N/A"),
         });
 
         await loadStalkerGenres();
@@ -995,8 +1031,10 @@ export default function HomePage() {
               signal,
             });
 
-            const json: unknown = await res.json();
-            const jsonObj = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : {};
+            const json: unknown = await res.json().catch(() => ({}));
+            const jsonObj = asObj(json);
+
+            if (handleMaybeVerifyRequired(res, jsonObj)) return;
 
             if (!res.ok || jsonObj["ok"] !== true) {
               const err = typeof jsonObj["error"] === "string" ? String(jsonObj["error"]) : "Check failed.";
@@ -1141,8 +1179,10 @@ export default function HomePage() {
               body: JSON.stringify({ url, mac: item.mac }),
               signal,
             });
-            const json: unknown = await res.json();
-            const jsonObj = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : {};
+            const json: unknown = await res.json().catch(() => ({}));
+            const jsonObj = asObj(json);
+
+            if (handleMaybeVerifyRequired(res, jsonObj)) return;
 
             if (!res.ok || jsonObj["ok"] !== true) {
               const err = typeof jsonObj["error"] === "string" ? String(jsonObj["error"]) : "Check failed.";

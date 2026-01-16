@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeUrl, parsePortFromOrigin } from "@/lib/validation";
 import { createInMemoryRateLimiter, getClientIp, RATE_MAX_CHECK_PER_WINDOW, RATE_WINDOW_MS } from "@/lib/rateLimit";
+import { isHumanVerified } from "@/lib/humanVerification";
 
 export const maxDuration = 30;
 
@@ -54,6 +55,13 @@ export async function POST(req: Request) {
   try {
     const blocked = requireClient(req);
     if (blocked) return blocked;
+
+    if (!(await isHumanVerified(req, Date.now()))) {
+      return NextResponse.json(
+        { requestId, ok: false, error: "Human verification required.", code: "human_verification_required" },
+        { status: 403, headers: NO_STORE_HEADERS }
+      );
+    }
 
     const ip = getClientIp(req);
     if (!rateLimiter.allow(ip)) {

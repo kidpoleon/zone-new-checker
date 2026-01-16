@@ -3,6 +3,7 @@ import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeStalkerUrl, normalizeMac, parsePortFromOrigin } from "@/lib/validation";
 import { lookup } from "dns/promises";
 import { createInMemoryRateLimiter, getClientIp, RATE_MAX_CHECK_PER_WINDOW, RATE_WINDOW_MS } from "@/lib/rateLimit";
+import { isHumanVerified } from "@/lib/humanVerification";
 
 // This route uses Node-only APIs (dns/promises), so it must not run in the Edge runtime.
 export const runtime = "nodejs";
@@ -316,6 +317,13 @@ export async function POST(req: Request) {
   try {
     const blocked = requireClient(req);
     if (blocked) return blocked;
+
+    if (!(await isHumanVerified(req, Date.now()))) {
+      return NextResponse.json(
+        { requestId, ok: false, error: "Human verification required.", code: "human_verification_required" },
+        { status: 403, headers: NO_STORE_HEADERS }
+      );
+    }
 
     const ip = getClientIp(req);
     if (!rateLimiter.allow(ip)) {

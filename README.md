@@ -1,54 +1,48 @@
-# ZONE NEW CHECKER (IPTV Checker)
 
-Dark, modern IPTV checker UI for **Xtream Codes API** and **Stalker/MAG portals**.
+# ZONE NEW CHECKER (IPTV Checker) — v2.0.0
 
-You can run **Single** checks or **Bulk** checks, and (in Single mode) browse a **playlist viewer** (categories/genres + channel lists) with a fast, clean UI.
+IPTV checker UI for **Xtream Codes API** and **Stalker/MAG portals**.
 
----
+This app validates credentials and displays **safe metadata only** (no playback / no streaming). It also includes a **free Cloudflare Turnstile** human verification gate to reduce abuse on public deployments.
 
 ## Table of contents
 
-- [What this does](#what-this-does)
-- [What it does NOT do](#what-it-does-not-do)
-- [Features](#features)
-- [Project docs](#project-docs)
-- [Quick start (Windows, ELI5)](#quick-start-windows-eli5)
-- [Deploy to Vercel (recommended)](#deploy-to-vercel-recommended)
-- [Run with Docker Compose](#run-with-docker-compose)
-- [Project structure](#project-structure)
-- [API routes (server)](#api-routes-server)
-- [Security + privacy notes](#security--privacy-notes)
-- [Troubleshooting](#troubleshooting)
-- [FAQ](#faq)
+- What this does / does not do
+- Features
+- Requirements
+- Quick start (local dev)
+- Production run (local)
+- Deploy to Vercel
+- Run with Docker
+- Environment variables
+- Security model (anti-abuse + anti-tamper)
+- Project structure
+- API routes
+- Troubleshooting
 
 ---
 
 ## What this does
 
-Validates IPTV credentials and shows safe, non-streaming metadata:
+Validates IPTV credentials and shows metadata:
 
 - **Xtream**: `URL + username + password`
 - **Stalker (MAC)**: `Portal URL + MAC address`
 
-Displayed fields (depending on protocol):
+Shows (best-effort, depends on portal):
 
-- **Expiry date** (best-effort parsing; Stalker portals are inconsistent)
-- **Max connections** (Xtream only; Stalker is unreliable and often omitted)
-- **Real URL** (server-reported URL or portal URL)
-- **Port**
-- **Timezone**
-- **Portal IP** (Stalker only; DNS lookup)
-- **Channels count** (Stalker only; best-effort)
+- expiry date
+- max connections (Xtream)
+- real URL / port / timezone
+- portal IP (Stalker)
+- channels count (Stalker, best-effort)
 
----
+## What this does NOT do
 
-## What it does NOT do
-
-- No playback.
-- No streaming.
-- No M3U exporting.
-- No storing credentials server-side.
-- No scraping or collecting your credentials.
+- no playback
+- no streaming
+- no M3U export
+- no server-side storage of credentials
 
 ---
 
@@ -56,182 +50,179 @@ Displayed fields (depending on protocol):
 
 ### Single mode
 
-- One-click **Check** (validation + auto-load playlist)
-- **Playlist Viewer**
-  - Xtream categories + channels (fast)
-  - Stalker genres + channels (fetches all pages server-side for the selected genre)
-  - Search in categories/genres and channels
-  - Channel sorting (Name/ID, Asc/Desc)
-  - Mobile-friendly playlist UI (Categories/Genres + Channels are tabs on small screens)
-  - Remembers last selected category/genre per server (localStorage)
-  - Clear selection button
+- One-click check
+- Playlist viewer
+  - Xtream categories + channels
+  - Stalker genres + channels (server paginates for you)
+  - fast search + sorting
 
 ### Bulk mode
 
-- Concurrency-limited bulk runner (safer and faster)
-- Inline validation + line counters
-- Stop button (AbortController)
-- Copy results
+- concurrency-limited runner
+- stop button (AbortController)
+- copy results
 
-### Reliability
+### Abuse protection (free)
 
-- Strict network timeouts on all portal requests
-- Defensive parsing for inconsistent portals
-- Image proxy route for logos (CORS/hotlink-safe)
+- Turnstile verification gate for expensive APIs
+- 5-minute signed HttpOnly cookie (aligned with Turnstile token lifetime)
+- per-IP in-memory rate limiting
+- `/api/image` SSRF protections
 
 ---
 
-## Project docs
+## Requirements
 
-- [License](./LICENSE)
-- [Changelog](./CHANGELOG.md)
-- [Contributing](./CONTRIBUTING.md)
-- [Security policy](./SECURITY.md)
-- [Code of conduct](./CODE_OF_CONDUCT.md)
+- Node.js LTS (recommended)
+- npm
 
-## Quick start (Windows, ELI5)
+Optional:
 
-### 1) Install Node.js
+- Docker Desktop / Docker Engine + Docker Compose v2
 
-- Download Node.js **LTS**:
-  - https://nodejs.org
+---
 
-### 2) Open PowerShell in the project folder
+## Quick start (local dev)
 
-In File Explorer:
-
-- Right-click the folder background
-- Click **Open in Terminal** / **Open PowerShell window here**
-
-### 3) Install dependencies
+1) Install dependencies:
 
 ```bash
 npm install
 ```
 
-### 4) Run the dev server
+2) Create `.env.local` (gitignored):
+
+```env
+# Turnstile (public)
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=...
+
+# Turnstile (server-only)
+TURNSTILE_SECRET_KEY=...
+
+# random secret for signing the 5-minute verification cookie
+HUMAN_COOKIE_SECRET=...
+
+# optional allowlist (comma-separated)
+# TURNSTILE_ALLOWED_HOSTNAMES=localhost,zone-new-checker.vercel.app
+
+# optional: Vercel metrics (works on Vercel)
+# NEXT_PUBLIC_ENABLE_VERCEL_ANALYTICS=1
+# NEXT_PUBLIC_ENABLE_VERCEL_SPEED_INSIGHTS=1
+```
+
+3) Run dev server:
 
 ```bash
 npm run dev
 ```
 
-### 5) Open the app
+Open:
 
-- Go to:
-  - http://localhost:3000
+- http://localhost:3000
+
+---
+
+## Production run (local)
+
+```bash
+npm run build
+npm run start
+```
 
 ---
 
 ## Deploy to Vercel (recommended)
 
-Vercel is the easiest way to keep this online 24/7.
+1) Push repo to GitHub/GitLab
+2) Import into Vercel
+3) Vercel builds and hosts it
 
-High-level idea:
+Build settings:
 
-1) Put your code in GitLab
-2) Connect GitLab repo to Vercel
-3) Vercel auto-builds and hosts it
+- framework: Next.js (auto)
+- build command: `npm run build`
+- output: auto
 
-### Build settings (Vercel)
+### Environment variables (Vercel)
 
-- Framework preset: **Next.js** (auto-detected)
-- Build command: `npm run build`
-- Output: (auto)
+Set these in **Project → Settings → Environment Variables**:
 
-No environment variables are required.
+- `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
+- `TURNSTILE_SECRET_KEY`
+- `HUMAN_COOKIE_SECRET`
 
-Checklist:
+Optional:
 
-- Make sure the repo builds locally: `npm run build`
-- Push to Git
-- Import the repo in Vercel
-- Deploy
+- `TURNSTILE_ALLOWED_HOSTNAMES` (comma-separated)
 
-### Enable Vercel Analytics + Speed Insights (recommended)
-
-In your Vercel project dashboard:
-
-- Enable **Web Analytics** (Analytics tab)
-- Enable **Speed Insights** (Speed Insights tab)
-
-This repo includes the required components in `app/layout.tsx`:
-
-- `@vercel/analytics` (`<Analytics />`)
-- `@vercel/speed-insights` (`<SpeedInsights />`)
-
-After deploying, you should see requests/scripts under:
-
-- `/_vercel/insights/*`
-- `/_vercel/speed-insights/*`
-
-### Vercel production hardening checklist (WAF/rate-limit/caching)
-
-These are *recommended* if you deploy publicly.
-
-- **WAF / rate limiting**
-  - Enable Vercel WAF on the project
-  - Add per-IP + per-path rules for:
-    - `/api/check/*`
-    - `/api/playlist/*`
-    - `/api/image`
-- **Bot protection**
-  - If available on your plan, enable bot protection / managed rules for:
-    - `/api/check/*`
-    - `/api/playlist/*`
-- **Caching rules**
-  - Credential endpoints must never be cached
-    - Confirm `Cache-Control: no-store` on `/api/check/*` and `/api/playlist/*`
-  - `/api/image` can be cached
-    - Success: `Cache-Control: public, max-age=86400`
-    - Errors: `Cache-Control: no-store`
-- **Observability**
-  - Monitor:
-    - 429 rate-limit responses
-    - upstream 502s
-    - timeout errors
-  - If you see timeouts, reduce client concurrency and/or upstream timeouts
+- `NEXT_PUBLIC_ENABLE_VERCEL_ANALYTICS=1`
+- `NEXT_PUBLIC_ENABLE_VERCEL_SPEED_INSIGHTS=1`
 
 ---
 
-## Run with Docker Compose
+## Run with Docker
 
-This is the easiest way to self-host on your own PC/VPS.
+### Option A: Docker Compose (recommended)
 
-No environment variables are required.
+1) Create `.env` next to `docker-compose.yml` (gitignored):
 
-### Requirements
+```env
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=...
+TURNSTILE_SECRET_KEY=...
+HUMAN_COOKIE_SECRET=...
 
-- Docker Desktop (Windows/Mac) or Docker Engine (Linux)
-- Docker Compose v2
+# optional
+# NEXT_PUBLIC_ENABLE_VERCEL_ANALYTICS=1
+# NEXT_PUBLIC_ENABLE_VERCEL_SPEED_INSIGHTS=1
+```
 
-If you are on Windows, install Docker Desktop and enable WSL2.
-
-### Start (production)
-
-In the project folder:
+2) Start:
 
 ```bash
 docker compose up -d --build
 ```
 
-Then open:
+Open:
 
 - http://localhost:3000
 
-If port 3000 is already used on your machine, stop the other app or change the port mapping in `docker-compose.yml`.
-
-### Stop
+Stop:
 
 ```bash
 docker compose down
 ```
 
-### Update to latest code
+---
+
+## Security model (important)
+
+### Secrets safety (DO NOT LEAK)
+
+- Never commit `.env.local`, `.env`, or any `TURNSTILE_*` keys.
+- This repo’s `.gitignore` already ignores:
+  - `.env`
+  - `.env.local`
+  - `.env.*.local`
+
+Before pushing:
 
 ```bash
-git pull
-docker compose up -d --build
+git status
 ```
+
+Confirm no env files are staged.
+
+### Human verification gate
+
+- Protected endpoints: `/api/check/*` and `/api/playlist/*`
+- When not verified, APIs return `403` with `code: human_verification_required`
+- UI redirects to `/verify`
+- After success, server sets a **signed HttpOnly cookie** valid for **5 minutes**
+
+### Rate limiting
+
+- In-memory per-IP limits are used (works well for single-instance/self-host)
+- On serverless (Vercel), limits are best-effort per instance
 
 ---
 
@@ -239,172 +230,71 @@ docker compose up -d --build
 
 ```text
 app/
-  page.tsx                 # UI (Single/Bulk modes + playlist viewer)
-  layout.tsx               # Metadata (title/icons)
-  globals.css              # Styling
+  page.tsx
+  verify/
+    page.tsx
+    VerifyClient.tsx
   api/
     check/
-      xtream/route.ts      # Xtream validation (player_api.php)
-      stalker/route.ts     # Stalker validation + DNS lookup (Node runtime)
     playlist/
-      xtream/route.ts      # Xtream categories/channels
-      stalker/route.ts     # Stalker genres/channels (paginated)
-    image/route.ts         # Logo proxy (hotlink/CORS safe)
+    verify-human/
+    image/
 lib/
-  validation.ts            # input normalization + bulk parsing
-  http.ts                  # fetchWithTimeout + safeJson
-  types.ts                 # shared types
+  http.ts
+  humanVerification.ts
+  rateLimit.ts
+  types.ts
+  validation.ts
 ```
 
 ---
 
-## API routes (server)
+## API routes
 
-All routes return JSON with:
+All routes return JSON:
 
-- `requestId` (uuid)
-- `ok: boolean`
-- `error?: string`
+- `requestId`
+- `ok`
+- `error?`
 
-All POST routes expect:
+All POST routes require:
 
 - `Content-Type: application/json`
 - `X-ZoneNew-Client: 1`
 
-### `POST /api/check/xtream`
+Routes:
 
-Validates Xtream credentials using:
-
-- `player_api.php` with `action=get_user_info`
-
-### `POST /api/check/stalker`
-
-Validates Stalker portals using a handshake flow:
-
-- Tries `portal.php` first
-- Falls back to `/stalker_portal/server/load.php`
-
-This route uses `dns/promises`, so it explicitly runs in **Node.js runtime** on Vercel.
-
-### `POST /api/playlist/xtream`
-
-Returns:
-
-- categories (always)
-- channels (only when `categoryId` is provided)
-
-### `POST /api/playlist/stalker`
-
-Returns:
-
-- genres (always)
-- channels (only when `genreId` is provided)
-
-Note:
-
-- The UI requests **all channels** for the selected genre in one response (server loops pages with safety caps).
-
-### `GET /api/image?url=...`
-
-Logo proxy:
-
-- restricts to `http/https`
-- forwards an image response
-- adds caching headers (`Cache-Control: public, max-age=86400`)
-
-Note:
-
-- The UI calls `/api/image?client=1&url=...`.
-
----
-
-## Security + privacy notes
-
-- This project stores your latest inputs/results in **your browser** via `localStorage`.
-- The serverless API routes must forward credentials to IPTV portals (by design) to validate.
-- No database is used.
-
-Plain English:
-
-- Your credentials are not scraped/collected.
-- Your credentials are only sent to the IPTV server you typed in (because that's the only way to validate them).
-
-Abuse / safety notes:
-
-- `/api/image` has basic anti-abuse protection (client header gate + simple rate limit + blocks localhost/private IPs).
-- `/api/check/*` and `/api/playlist/*` enforce JSON content-type and input size caps.
-- All upstream portal requests use strict timeouts.
-
-If you want maximum privacy:
-
-- self-host on your own domain
-- avoid sharing deployed links publicly
+- `POST /api/check/xtream`
+- `POST /api/check/stalker`
+- `POST /api/playlist/xtream`
+- `POST /api/playlist/stalker`
+- `POST /api/verify-human`
+- `GET /api/image?url=...`
 
 ---
 
 ## Troubleshooting
 
-### “It works locally but not on Vercel”
+### Verify page says “Server not configured”
 
-- Some IPTV portals block datacenter/serverless IPs.
-- Portals can be slow or return non-JSON HTML.
+- Ensure `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set.
+- Restart dev server after editing `.env.local`.
 
-This app uses strict timeouts to avoid hanging.
+### Verification fails
 
-### Docker Compose troubleshooting
+- Ensure `TURNSTILE_SECRET_KEY` is correct.
+- Confirm your Turnstile widget allows your domain.
 
-#### Port 3000 already in use
+### Vercel build works locally but fails on Vercel
 
-- Stop the other program using port 3000, OR
-- Change the port mapping in `docker-compose.yml` (example: `"8080:3000"`) and open `http://localhost:8080`.
-
-#### Build fails / takes too long
-
-- First time build can be slow (it installs dependencies and runs `next build`).
-- If it fails, try rebuilding from scratch:
-
-```bash
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-```
-
-#### How do I confirm it’s running?
-
-```bash
-docker compose ps
-docker compose logs -f
-```
-
-### Lint/build errors
-
-- Run:
-
-```bash
-npm install
-npm run build
-```
-
-If you see ESLint/Next config conflicts, ensure `next` and `eslint-config-next` are pinned to the same version.
-
-### Stalker portals are inconsistent
-
-- Expiry can appear in unusual fields.
-- Some portals require `/c` or other path; the app preserves Stalker URL paths.
+- Some IPTV portals block data center IPs.
+- Tighten client concurrency or expect more timeouts.
 
 ---
 
-## FAQ
+## License / Docs
 
-### Does this play streams?
-
-No.
-
-### Does this store my credentials?
-
-Only in your own browser (localStorage) for convenience.
-
-### Why do logos sometimes fail?
-
-Portals block hotlinking or have broken/relative URLs. The app proxies images via `/api/image`.
+- License: `LICENSE`
+- Changelog: `CHANGELOG.md`
+- Security policy: `SECURITY.md`
 
