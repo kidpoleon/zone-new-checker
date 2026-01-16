@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeUrl, parsePortFromOrigin } from "@/lib/validation";
+import { createInMemoryRateLimiter, getClientIp, RATE_MAX_CHECK_PER_WINDOW, RATE_WINDOW_MS } from "@/lib/rateLimit";
 
 export const maxDuration = 30;
+
+const rateLimiter = createInMemoryRateLimiter(RATE_WINDOW_MS, RATE_MAX_CHECK_PER_WINDOW);
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -51,6 +54,11 @@ export async function POST(req: Request) {
   try {
     const blocked = requireClient(req);
     if (blocked) return blocked;
+
+    const ip = getClientIp(req);
+    if (!rateLimiter.allow(ip)) {
+      return NextResponse.json({ requestId, ok: false, error: "Too many requests." }, { status: 429, headers: NO_STORE_HEADERS });
+    }
 
     const ct = (req.headers.get("content-type") || "").toLowerCase();
     if (!ct.includes("application/json")) {

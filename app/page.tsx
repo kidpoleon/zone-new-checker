@@ -1954,6 +1954,15 @@ export default function HomePage() {
           <a className="footerLink" href="https://gitlab.com/jackbo987/zone-new-checker" target="_blank" rel="noreferrer">
             GitLab
           </a>
+          <span className="small">|</span>
+          <a
+            className="footerLink"
+            href="https://tally.so/r/NpXOKb"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            Feedback
+          </a>
         </div>
       </div>
 

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { fetchWithTimeout, safeJson } from "@/lib/http";
 import { normalizeUrl } from "@/lib/validation";
+import { createInMemoryRateLimiter, getClientIp, RATE_MAX_PLAYLIST_PER_WINDOW, RATE_WINDOW_MS } from "@/lib/rateLimit";
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
 } as const;
+
+const rateLimiter = createInMemoryRateLimiter(RATE_WINDOW_MS, RATE_MAX_PLAYLIST_PER_WINDOW);
 
 function requireClient(req: Request): Response | null {
   const v = req.headers.get("x-zonenew-client");
@@ -80,6 +83,11 @@ export async function POST(req: Request) {
   try {
     const blocked = requireClient(req);
     if (blocked) return blocked;
+
+    const ip = getClientIp(req);
+    if (!rateLimiter.allow(ip)) {
+      return NextResponse.json({ requestId, ok: false, error: "Too many requests." }, { status: 429, headers: NO_STORE_HEADERS });
+    }
 
     const ct = (req.headers.get("content-type") || "").toLowerCase();
     if (!ct.includes("application/json")) {
