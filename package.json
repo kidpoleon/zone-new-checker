@@ -1,9 +1,9 @@
 {
   "name": "zone-new-checker",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Professional IPTV credential validator with smart Base64 decoding",
   "private": true,
-  "author": "Zone New Team",
+  "author": "kidpoleon <kidpoleon@proton.me>",
   "license": "MIT",
   "repository": {
     "type": "git",

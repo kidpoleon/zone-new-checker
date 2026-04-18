@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-04-18
+
+### Changed
+
+**UI/UX Polish:**
+- **Sleeker Empty State**: Removed emoji, replaced with minimalist "Ready for input" text
+- **Cleaner Visual Design**: Dashed border separator, uppercase typography, reduced padding
+- **Consistent Styling**: Unified spacing and color scheme
+
+**Documentation & Attribution:**
+- **Updated Author**: Changed from "Zone New Team" to "kidpoleon <kidpoleon@proton.me>"
+- **Updated LICENSE**: Copyright now reads "kidpoleon (kidpoleon@proton.me)"
+- **README Updates**: 
+  - Version bump to v3.1
+  - Removed Reddit integration references
+  - Updated feature descriptions to match current functionality
+  - Fixed license attribution
+
+**Vercel Analytics & Speed Insights:**
+- **Enabled by Default**: Analytics and Speed Insights now active unless explicitly disabled
+- **Opt-out Model**: Set `NEXT_PUBLIC_ENABLE_VERCEL_ANALYTICS=0` or `NEXT_PUBLIC_ENABLE_VERCEL_SPEED_INSIGHTS=0` to disable
+- **Updated .env.example**: Documentation reflects new default behavior
+- **Updated layout.tsx**: Changed logic from opt-in to opt-out
+
+### Technical
+
+- Updated `package.json` author field
+- Updated `.env.example` header to v3.1
+- Updated `layout.tsx` metadata and analytics logic
+- Cleaned empty state component (removed emoji, streamlined design)
+
 ## [3.1.0] - 2026-04-18
 
 ### Added

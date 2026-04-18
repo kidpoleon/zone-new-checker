@@ -1,5 +1,5 @@
 # =============================================================================
-# Zone New Checker v3.0 - Docker Ignore Configuration
+# Zone New Checker v3.1 - Docker Ignore Configuration
 # Prevents unnecessary files from being included in Docker build context
 # =============================================================================
 

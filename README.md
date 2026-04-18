@@ -1,10 +1,10 @@
 <div align="center">
 
-# 🔐 Zone New Checker v3.0
+# 🔐 Zone New Checker v3.1
 
-**Professional IPTV Credential Validator with Base64 Decoding & Reddit Integration**
+**Professional IPTV Credential Validator with Smart Base64 Decoding**
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](./CHANGELOG.md)
 [![Next.js](https://img.shields.io/badge/Next.js-14.2-000000?logo=next.js)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript)](https://www.typescriptlang.org)
@@ -39,7 +39,7 @@ Zone New Checker is a professional-grade IPTV credential validation tool with ad
 - ✅ Validates **Xtream Codes** credentials (`URL + username + password`)
 - ✅ Validates **Stalker/MAG** portals (`Portal URL + MAC address`)
 - ✅ **Base64 decoding** with URL extraction from decoded content
-- ✅ **Reddit integration** - fetch and decode credentials from Reddit posts
+- ✅ **Smart Base64 decoding** - auto-detects valid Base64 with visual feedback
 - ✅ Displays safe metadata only (no playback/streaming)
 - ✅ Human verification via Cloudflare Turnstile
 
@@ -49,7 +49,7 @@ Zone New Checker is a professional-grade IPTV credential validation tool with ad
 |------------|----------------|
 | **Xtream** | Expiry date, max connections, active connections, real URL, port, timezone |
 | **Stalker** | Expiry date, portal IP, channels count, timezone |
-| **Base64** | Decoded content, extracted URLs, Reddit post metadata |
+| **Base64** | Decoded content, extracted URLs, smart validation |
 
 ---
 
@@ -82,8 +82,8 @@ Zone New Checker is a professional-grade IPTV credential validation tool with ad
 ### 🔧 Base64 Decoder
 
 - **Smart detection** of Base64 in messy input
-- **Reddit URL support** - fetch posts directly
-- **Metadata extraction** - author, timestamp, subreddit
+- **Smart validation** - color-coded feedback (green/yellow/red)
+- **URL detection** - suggests correct mode for URLs
 - **URL-safe Base64** support
 - **Automatic URL extraction** from decoded content
 
@@ -265,7 +265,6 @@ X-ZoneNew-Client: 1
 | `POST` | `/api/check/stalker` | Validate Stalker MAC |
 | `POST` | `/api/playlist/xtream` | Fetch Xtream categories/channels |
 | `POST` | `/api/playlist/stalker` | Fetch Stalker genres/channels |
-| `POST` | `/api/fetch-reddit` | Fetch & decode Reddit post |
 | `POST` | `/api/verify-human` | Verify Turnstile token |
 | `GET`  | `/api/image?url=...` | Proxy image with SSRF protection |
 
@@ -387,7 +386,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for gu
 
 ## 📜 License
 
-[MIT License](./LICENSE) © Zone New Team
+[MIT License](./LICENSE) © kidpoleon <kidpoleon@proton.me>
 
 ---
 

@@ -2148,7 +2148,7 @@ export default function HomePage() {
                   {base64Error ? <div id="base64-error" className="fieldError" role="alert">{base64Error}</div> : null}
                 </div>
 
-                {/* Empty state illustration */}
+                {/* Empty state - minimalist sleek design */}
                 {!hasInput && !base64Output && (
                   <div 
                     className="empty-state"
@@ -2157,16 +2157,23 @@ export default function HomePage() {
                       flexDirection: "column",
                       alignItems: "center",
                       justifyContent: "center",
-                      padding: "24px 16px",
-                      opacity: 0.6,
-                      fontSize: 13,
-                      textAlign: "center"
+                      padding: "16px",
+                      marginTop: 8,
+                      borderTop: "1px dashed rgba(231, 238, 247, 0.1)",
                     }}
                     aria-hidden="true"
                   >
-                    <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.5 }}>🔐</div>
-                    <div style={{ color: "var(--muted)" }}>Paste a Base64 string to decode</div>
-                    <div style={{ fontSize: 11, marginTop: 4, opacity: 0.5 }}>or use Ctrl+V to paste</div>
+                    <div style={{ 
+                      fontSize: 12, 
+                      color: "var(--muted)", 
+                      letterSpacing: "0.5px",
+                      textTransform: "uppercase"
+                    }}>
+                      Ready for input
+                    </div>
+                    <div style={{ fontSize: 11, marginTop: 4, color: "var(--muted)", opacity: 0.7 }}>
+                      Ctrl+V to paste • Ctrl+Enter to decode
+                    </div>
                   </div>
                 )}
 
