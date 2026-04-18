@@ -116,6 +116,40 @@ export default function HomePage() {
   const [xtreamBulk, setXtreamBulk] = useState<XtreamBulkState>({ lines: "" });
   const [stalkerBulk, setStalkerBulk] = useState<StalkerBulkState>({ url: "", macs: "" });
 
+  // Base64 decoder state
+  const [base64Input, setBase64Input] = useState<string>("");
+  const [base64Output, setBase64Output] = useState<string>("");
+  const [base64Error, setBase64Error] = useState<string>("");
+  const [base64Urls, setBase64Urls] = useState<string[]>([]);
+  const [redditBase64List, setRedditBase64List] = useState<string[]>([]);
+  const [fetchingReddit, setFetchingReddit] = useState<boolean>(false);
+  const [redditMeta, setRedditMeta] = useState<{ author?: string; createdUtc?: number; title?: string; subreddit?: string } | null>(null);
+
+  // Detect if input contains a Reddit URL
+  const hasRedditUrl = useMemo(() => {
+    const input = base64Input.trim();
+    if (!input) return false;
+    // Check for reddit.com or redd.it (short links)
+    return /reddit\.com\//.test(input) || /redd\.it\//.test(input);
+  }, [base64Input]);
+
+  // Format Unix timestamp to readable date
+  const formatTimestamp = useCallback((utc?: number): string => {
+    if (!utc) return "";
+    try {
+      const date = new Date(utc * 1000);
+      return date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }, []);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
 
@@ -137,7 +171,7 @@ export default function HomePage() {
   const [xtreamCatSearch, setXtreamCatSearch] = useState<string>("");
 
   const [copiedXtreamStreamId, setCopiedXtreamStreamId] = useState<string>("");
-  const [toast, setToast] = useState<string>("");
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" | "warning" } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const [xtreamHoverUrl, setXtreamHoverUrl] = useState<string>("");
 
@@ -350,6 +384,7 @@ export default function HomePage() {
   }, [mode, runMode, xtreamSingle, stalkerSingle, xtreamBulk, stalkerBulk, singleResult, bulkResults]);
 
   const activeTitle = useMemo(() => {
+    if (mode === "base64") return "Base64 Decoder";
     const left = mode === "xtream" ? "Xtream" : "Stalker (MAC)";
     const right = runMode === "single" ? "Single" : "Bulk";
     return `${left} • ${right}`;
@@ -513,6 +548,254 @@ export default function HomePage() {
     return bulkSort.dir === "asc" ? "↑" : "↓";
   }
 
+  // Base64 decode functions - intelligent extraction and decoding
+  // paste.sh URLs always start with "aHR0cHM6Ly9wYXN0ZS5z" (https://paste.s)
+  const PASTESH_SIGNATURE = "aHR0cHM6Ly9wYXN0ZS5z";
+
+  function cleanInvalidBase64Chars(input: string): string {
+    // Keep only valid Base64 characters
+    // Standard: A-Za-z0-9+/  URL-safe: A-Za-z0-9-_
+    return input.replace(/[^A-Za-z0-9+\/_=-]/g, "");
+  }
+
+  function isValidBase64(str: string): boolean {
+    // Check if string can be decoded
+    try {
+      const normalized = normalizeBase64(str);
+      atob(normalized);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function extractBase64FromMessyInput(input: string): string | null {
+    // Remove all whitespace, newlines
+    const cleaned = input.replace(/\s+/g, "");
+    
+    // Strategy 1: Look for paste.sh signature and extract from there
+    const pasteShIndex = cleaned.indexOf(PASTESH_SIGNATURE);
+    if (pasteShIndex !== -1) {
+      // Start from the signature, extract valid base64 characters only
+      let base64Candidate = "";
+      let paddingCount = 0;
+      for (let i = pasteShIndex; i < cleaned.length; i++) {
+        const char = cleaned[i];
+        // Valid base64 chars: A-Z, a-z, 0-9, +, /, -, _, =
+        if (/[A-Za-z0-9+\/_=-]/.test(char)) {
+          base64Candidate += char;
+          // Track padding - once we see =, we're at the end of base64
+          if (char === "=") {
+            paddingCount++;
+            // Base64 can have 0, 1, or 2 padding chars at the end
+            // After we've collected padding, we're done
+            if (paddingCount >= 2) break;
+            // Check if next char is also padding or non-base64
+            const nextChar = cleaned[i + 1];
+            if (nextChar !== "=" && !/[A-Za-z0-9+\/_-]/.test(nextChar)) {
+              break;
+            }
+          }
+        } else {
+          // Stop at first invalid character
+          break;
+        }
+      }
+      
+      if (base64Candidate.length >= 8 && isValidBase64(base64Candidate)) {
+        return base64Candidate;
+      }
+    }
+    
+    // Strategy 2: Find paste.sh signature inside long sequences and extract valid base64
+    // This handles cases like "SometextaHR0cHM6Ly9wYXN0ZS5zaC95am0zazltMmc="
+    const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=_-";
+    let currentSequence = "";
+    let bestValidSequence: string | null = null;
+    
+    for (let i = 0; i < cleaned.length; i++) {
+      const char = cleaned[i];
+      if (base64Chars.includes(char)) {
+        currentSequence += char;
+      } else {
+        // End of sequence, process it
+        if (currentSequence.length >= 8) {
+          // Check if this sequence contains the paste.sh signature
+          const sigIndex = currentSequence.indexOf(PASTESH_SIGNATURE);
+          if (sigIndex !== -1) {
+            // Extract from signature to end, stopping at padding
+            let candidate = "";
+            let paddingSeen = false;
+            for (let j = sigIndex; j < currentSequence.length; j++) {
+              const c = currentSequence[j];
+              if (c === "=") paddingSeen = true;
+              if (paddingSeen && c !== "=") break;
+              candidate += c;
+            }
+            if (candidate.length >= 8 && isValidBase64(candidate)) {
+              // This is a paste.sh URL - prioritize it
+              return candidate;
+            }
+          }
+          // Also check if the whole sequence is valid
+          if (isValidBase64(currentSequence)) {
+            if (!bestValidSequence || currentSequence.length > bestValidSequence.length) {
+              bestValidSequence = currentSequence;
+            }
+          }
+        }
+        currentSequence = "";
+      }
+    }
+    
+    // Check the last sequence
+    if (currentSequence.length >= 8) {
+      const sigIndex = currentSequence.indexOf(PASTESH_SIGNATURE);
+      if (sigIndex !== -1) {
+        let candidate = "";
+        let paddingSeen = false;
+        for (let j = sigIndex; j < currentSequence.length; j++) {
+          const c = currentSequence[j];
+          if (c === "=") paddingSeen = true;
+          if (paddingSeen && c !== "=") break;
+          candidate += c;
+        }
+        if (candidate.length >= 8 && isValidBase64(candidate)) {
+          return candidate;
+        }
+      }
+      if (isValidBase64(currentSequence)) {
+        if (!bestValidSequence || currentSequence.length > bestValidSequence.length) {
+          bestValidSequence = currentSequence;
+        }
+      }
+    }
+    
+    if (bestValidSequence) return bestValidSequence;
+    
+    // Strategy 3: Fallback - try regex pattern matching for any long sequences
+    const base64Pattern = /[A-Za-z0-9+\/_-]{8,}(?:=[=]{0,2})?/g;
+    const matches = cleaned.match(base64Pattern);
+    
+    if (matches && matches.length > 0) {
+      // Sort by length descending and return longest
+      const sorted = matches.sort((a, b) => b.length - a.length);
+      const cleaned = cleanInvalidBase64Chars(sorted[0]);
+      if (isValidBase64(cleaned)) return cleaned;
+    }
+    
+    return null;
+  }
+
+  function normalizeBase64(input: string): string {
+    // Convert URL-safe Base64 to standard Base64
+    let normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+    
+    // Add padding if missing
+    const padLength = (4 - (normalized.length % 4)) % 4;
+    normalized += "=".repeat(padLength);
+    
+    return normalized;
+  }
+
+  function extractUrls(text: string): string[] {
+    // Extract URLs from text (http/https)
+    const urlPattern = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
+    return text.match(urlPattern) || [];
+  }
+
+  function decodeBase64(input: string): { decoded: string; urls: string[]; extractedBase64: string } {
+    // Step 1: Extract Base64 from messy input
+    const extractedBase64 = extractBase64FromMessyInput(input);
+    if (!extractedBase64) throw new Error("No valid Base64 found in input");
+    
+    // Step 2: Normalize (handle URL-safe Base64)
+    const normalized = normalizeBase64(extractedBase64);
+    
+    // Step 3: Decode
+    let decoded: string;
+    try {
+      decoded = atob(normalized);
+    } catch {
+      // Try with UTF-8 decoding for non-ASCII
+      try {
+        const binary = atob(normalized);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        decoded = new TextDecoder().decode(bytes);
+      } catch (e) {
+        throw new Error("Invalid Base64 string - extraction found: " + extractedBase64.slice(0, 20) + "...");
+      }
+    }
+    
+    // Step 4: Extract URLs from decoded content
+    const urls = extractUrls(decoded);
+    
+    return { decoded, urls, extractedBase64 };
+  }
+
+  function handleBase64Decode() {
+    setBase64Error("");
+    setBase64Output("");
+    setBase64Urls([]);
+    try {
+      const result = decodeBase64(base64Input);
+      setBase64Output(result.decoded);
+      setBase64Urls(result.urls);
+    } catch (e) {
+      setBase64Error(e instanceof Error ? e.message : "Decode failed");
+    }
+  }
+
+  function openInPasteSh(urlToOpen?: string) {
+    const targetUrl = urlToOpen || "https://paste.sh";
+    window.open(targetUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function fetchRedditPost(url: string) {
+    setFetchingReddit(true);
+    setRedditBase64List([]);
+    setRedditMeta(null);
+    setBase64Error("");
+    try {
+      const res = await fetch("/api/fetch-reddit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
+        body: JSON.stringify({ url }),
+      });
+      const json = await res.json().catch(() => ({ ok: false, error: "Invalid response from server" }));
+      if (!res.ok || !json.ok) {
+        const errorMsg = json.error || `Failed to fetch Reddit post (HTTP ${res.status})`;
+        setBase64Error(errorMsg);
+        showToast("Failed to fetch Reddit post", "error");
+        return;
+      }
+      
+      // Store metadata
+      if (json.meta) {
+        setRedditMeta(json.meta);
+      }
+      
+      if (json.base64Strings && json.base64Strings.length > 0) {
+        setRedditBase64List(json.base64Strings);
+        // Auto-fill the first Base64 string into the input
+        setBase64Input(json.base64Strings[0]);
+        showToast(`Found ${json.base64Strings.length} Base64 string${json.base64Strings.length > 1 ? "s" : ""}!`, "success");
+      } else {
+        setBase64Error("No Base64 strings found in this Reddit post. The post may contain credentials in a different format.");
+        showToast("No Base64 found", "warning");
+      }
+    } catch (e: unknown) {
+      const errorMsg = e instanceof Error ? e.message : "Network error. Please check your connection and try again.";
+      setBase64Error(errorMsg);
+      showToast("Failed to fetch Reddit post", "error");
+    } finally {
+      setFetchingReddit(false);
+    }
+  }
+
   const filteredXtreamChannels = useMemo(() => {
     const q = xtreamSearchDebounced.trim().toLowerCase();
     if (!q) return xtreamChannels;
@@ -635,10 +918,10 @@ export default function HomePage() {
     resetPlaylistState();
   }, [mode, runMode, resetPlaylistState]);
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
+  const showToast = useCallback((msg: string, type: "success" | "error" | "info" | "warning" = "info") => {
+    setToast({ message: msg, type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToast(""), 1800);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 2500);
   }, []);
 
   async function loadXtreamCategories() {
@@ -1337,7 +1620,10 @@ export default function HomePage() {
         <div>
           <div className="title">ZONE NEW CHECKER</div>
           <div className="subtitle">
-            Built for <a href="https://www.reddit.com/r/IPTV_ZONENEW/" target="_blank" rel="noreferrer">r/IPTV_ZONENEW</a>. Validate Xtream or Stalker (MAC). Stored only in your browser.
+            {mode === "base64" 
+              ? "Decode Base64 strings and open paste.sh links. All processing happens in your browser."
+              : <>Built for <a href="https://www.reddit.com/r/IPTV_ZONENEW/" target="_blank" rel="noreferrer">r/IPTV_ZONENEW</a>. Validate Xtream or Stalker (MAC). Stored only in your browser.</>
+            }
           </div>
         </div>
         <span className="badge">{activeTitle}</span>
@@ -1346,7 +1632,7 @@ export default function HomePage() {
       <div className="panel checkerPanel" data-mode={mode}>
         <div className="checkerTop">
           <div className="checkerSelectors">
-            <div className="segmented" aria-label="Provider" data-active={mode === "xtream" ? "left" : "right"}>
+            <div className="segmented triple" aria-label="Provider" data-active={mode}>
               <span className="segmentedIndicator" aria-hidden="true" />
               <button
                 type="button"
@@ -1370,27 +1656,39 @@ export default function HomePage() {
               >
                 Stalker (MAC)
               </button>
-            </div>
-
-            <div className="segmented" aria-label="Run mode" data-active={runMode === "single" ? "left" : "right"}>
-              <span className="segmentedIndicator" aria-hidden="true" />
-              <button type="button" data-active={runMode === "single"} onClick={() => setRunMode("single")} disabled={busy}>
-                Single
-              </button>
-              <button type="button" data-active={runMode === "bulk"} onClick={() => setRunMode("bulk")} disabled={busy}>
-                Bulk
+              <button
+                type="button"
+                data-active={mode === "base64"}
+                onClick={() => setMode("base64")}
+                disabled={busy}
+              >
+                Base64
               </button>
             </div>
+
+            {mode !== "base64" && (
+              <div className="segmented" aria-label="Run mode" data-active={runMode === "single" ? "left" : "right"}>
+                <span className="segmentedIndicator" aria-hidden="true" />
+                <button type="button" data-active={runMode === "single"} onClick={() => setRunMode("single")} disabled={busy}>
+                  Single
+                </button>
+                <button type="button" data-active={runMode === "bulk"} onClick={() => setRunMode("bulk")} disabled={busy}>
+                  Bulk
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="checkerActions">
-            <button className="btn" onClick={copyAll} disabled={busy}>
-              Copy
-            </button>
-            <button className="btn danger" onClick={resetAll} disabled={busy}>
-              Reset
-            </button>
-          </div>
+          {mode !== "base64" && (
+            <div className="checkerActions">
+              <button className="btn" onClick={copyAll} disabled={busy}>
+                Copy
+              </button>
+              <button className="btn danger" onClick={resetAll} disabled={busy}>
+                Reset
+              </button>
+            </div>
+          )}
         </div>
 
         <div style={{ height: 12 }} />
@@ -1472,6 +1770,211 @@ export default function HomePage() {
                 <div className="notice">
                   Max 50 lines per bulk run (safety). Lines: {stalkerBulkSummary.total} • Valid: {stalkerBulkSummary.valid} • Invalid: {stalkerBulkSummary.invalid}
                 </div>
+              </div>
+            )}
+
+            {mode === "base64" && (
+              <div className="row" style={{ gap: 12 }}>
+                <div>
+                  <label>INPUT</label>
+                  <textarea
+                    className="bulkTextarea"
+                    value={base64Input}
+                    onChange={(e) => setBase64Input(e.target.value)}
+                    placeholder="Paste messy Base64 here (e.g., 'check this aHR0c...') or Reddit URL"
+                    rows={4}
+                    style={{ minHeight: 80 }}
+                  />
+                  {base64Error ? <div className="fieldError">{base64Error}</div> : null}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <button
+                    className="btn primary"
+                    onClick={handleBase64Decode}
+                    disabled={!base64Input.trim()}
+                  >
+                    Decode
+                  </button>
+                  
+                  {/* Paste button - always visible */}
+                  <button
+                    className="btn"
+                    onClick={async () => {
+                      try {
+                        const text = await navigator.clipboard.readText();
+                        setBase64Input(text);
+                        setBase64Error("");
+                        showToast("Pasted from clipboard!", "success");
+                      } catch {
+                        setBase64Error("Could not access clipboard. Please paste manually.");
+                      }
+                    }}
+                  >
+                    Paste
+                  </button>
+                  
+                  {/* Fetch button - only shown when Reddit URL detected */}
+                  {hasRedditUrl && (
+                    <button
+                      className="btn"
+                      style={{ 
+                        background: "rgba(255, 69, 0, 0.15)", 
+                        borderColor: "rgba(255, 69, 0, 0.35)" 
+                      }}
+                      onClick={() => fetchRedditPost(base64Input.trim())}
+                      disabled={fetchingReddit}
+                    >
+                      {fetchingReddit ? (
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span className="spinner" /> Fetching...
+                        </span>
+                      ) : (
+                        "Fetch from Reddit"
+                      )}
+                    </button>
+                  )}
+                  
+                  <button
+                    className="btn danger"
+                    onClick={() => {
+                      setBase64Input("");
+                      setBase64Output("");
+                      setBase64Error("");
+                      setBase64Urls([]);
+                      setRedditBase64List([]);
+                      setRedditMeta(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {/* Multiple Base64 strings from Reddit */}
+                {redditBase64List.length > 1 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 6, textTransform: "uppercase" }}>
+                      FOUND {redditBase64List.length} BASE64 STRINGS - CLICK TO SELECT
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {redditBase64List.map((b64, idx) => (
+                        <button
+                          key={idx}
+                          className="btn small"
+                          onClick={() => {
+                            setBase64Input(b64);
+                            setBase64Output("");
+                            setBase64Urls([]);
+                          }}
+                          style={{
+                            textAlign: "left",
+                            fontFamily: "monospace",
+                            fontSize: 11,
+                            background: base64Input === b64 ? "rgba(19, 141, 224, 0.22)" : undefined,
+                            borderColor: base64Input === b64 ? "rgba(19, 141, 224, 0.38)" : undefined,
+                          }}
+                        >
+                          #{idx + 1}: {b64.slice(0, 50)}{b64.length > 50 ? "..." : ""}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {base64Output && (
+                  <div style={{ marginTop: 4 }}>
+                    <label>DECODED</label>
+                    <textarea
+                      className="bulkTextarea"
+                      value={base64Output}
+                      readOnly
+                      rows={3}
+                      style={{ background: "rgba(255,255,255,0.05)", minHeight: 60 }}
+                    />
+
+                    {/* Extracted URLs - Compact Display */}
+                    {base64Urls.length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ 
+                          fontSize: 11, 
+                          color: "var(--accent)", 
+                          marginBottom: 6, 
+                          textTransform: "uppercase",
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: "8px 16px",
+                          alignItems: "center"
+                        }}>
+                          <span>URL{base64Urls.length > 1 ? "S" : ""} FOUND</span>
+                          {redditMeta?.author && (
+                            <span style={{ 
+                              fontSize: 10, 
+                              color: "var(--muted)", 
+                              textTransform: "none",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4
+                            }}>
+                              <span style={{ opacity: 0.7 }}>by</span>
+                              <span style={{ color: "var(--ok)", fontWeight: 500 }}>u/{redditMeta.author}</span>
+                              {redditMeta.createdUtc && (
+                                <span style={{ opacity: 0.7 }}>• {formatTimestamp(redditMeta.createdUtc)}</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {base64Urls.map((url, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "6px 10px",
+                                background: "rgba(100,200,255,0.08)",
+                                border: "1px solid rgba(100,200,255,0.2)",
+                                borderRadius: 6,
+                              }}
+                            >
+                              <span style={{ flex: 1, fontSize: 12, wordBreak: "break-all" }}>{url}</span>
+                              <button
+                                className="btn small"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(url);
+                                  showToast("URL copied!", "success");
+                                }}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                      <button
+                        className="btn small"
+                        onClick={() => {
+                          navigator.clipboard.writeText(base64Output);
+                          showToast("Copied!", "success");
+                        }}
+                      >
+                        Copy Output
+                      </button>
+                      {base64Urls.length > 0 && (
+                        <button
+                          className="btn primary small"
+                          onClick={() => openInPasteSh(base64Urls[0])}
+                          title="Open paste.sh URL in new tab"
+                        >
+                          Open URL
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1722,7 +2225,7 @@ export default function HomePage() {
                                 }
 
                                 setCopiedXtreamStreamId(streamId);
-                                showToast("Copied Stream Link");
+                                showToast("Copied Stream Link", "success");
                                 window.setTimeout(() => {
                                   setCopiedXtreamStreamId((cur) => (cur === streamId ? "" : cur));
                                 }, 1500);
@@ -1991,8 +2494,8 @@ export default function HomePage() {
             Resources
           </a>
           <span className="small">|</span>
-          <a className="footerLink" href="https://gitlab.com/jackbo987/zone-new-checker" target="_blank" rel="noreferrer">
-            GitLab
+          <a className="footerLink" href="https://github.com/kidpoleon/zone-new-checker" target="_blank" rel="noreferrer">
+            GitHub
           </a>
           <span className="small">|</span>
           <a
@@ -2006,7 +2509,19 @@ export default function HomePage() {
         </div>
       </div>
 
-      {toast ? <div className="toast">{toast}</div> : null}
+      {toast ? (
+        <div 
+          className={`toast toast-${toast.type}`}
+          role="status"
+          aria-live="polite"
+        >
+          {toast.type === "success" && <span style={{ marginRight: 6 }}>✓</span>}
+          {toast.type === "error" && <span style={{ marginRight: 6 }}>✗</span>}
+          {toast.type === "warning" && <span style={{ marginRight: 6 }}>⚠</span>}
+          {toast.type === "info" && <span style={{ marginRight: 6 }}>ℹ</span>}
+          {toast.message}
+        </div>
+      ) : null}
 
       <div style={{ height: 16 }} />
     </main>

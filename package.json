@@ -1,12 +1,39 @@
 {
   "name": "zone-new-checker",
-  "version": "2.0.0",
+  "version": "3.0.0",
+  "description": "Professional IPTV credential validator with Base64 decoding and Reddit integration",
   "private": true,
+  "author": "Zone New Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kidpoleon/zone-new-checker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kidpoleon/zone-new-checker/issues"
+  },
+  "homepage": "https://github.com/kidpoleon/zone-new-checker#readme",
+  "keywords": [
+    "iptv",
+    "xtream-codes",
+    "stalker",
+    "mag",
+    "credential-validator",
+    "base64-decoder",
+    "nextjs",
+    "react"
+  ],
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .next out node_modules"
   },
   "dependencies": {
     "@vercel/analytics": "^1.6.1",

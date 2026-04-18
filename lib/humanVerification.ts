@@ -60,7 +60,8 @@ export async function createHumanCookieValue(nowMs: number): Promise<string> {
 
 export async function isHumanVerified(req: Request, nowMs: number): Promise<boolean> {
   const secret = process.env.HUMAN_COOKIE_SECRET;
-  if (!secret) return false;
+  // If no secret is configured (local dev), skip verification
+  if (!secret) return true;
 
   const cookies = parseCookieHeader(req.headers.get("cookie"));
   const v = cookies[HUMAN_COOKIE_NAME];

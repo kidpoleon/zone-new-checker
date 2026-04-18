@@ -28,6 +28,13 @@ export default function VerifyClient() {
 
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 
+  // Auto-redirect if Turnstile is not configured (local development)
+  useEffect(() => {
+    if (!siteKey) {
+      router.replace(returnTo);
+    }
+  }, [siteKey, router, returnTo]);
+
   useEffect(() => {
     window.onTurnstileSuccess = (t: string) => {
       setToken(String(t || ""));

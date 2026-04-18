@@ -1,4 +1,4 @@
-export type Mode = "xtream" | "stalker";
+export type Mode = "xtream" | "stalker" | "base64";
 export type RunMode = "single" | "bulk";
 
 export type CheckResult = {
