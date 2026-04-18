@@ -28,6 +28,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Conditional Validation**: Color-coded validation only shown in decode mode
 - **Operation-Aware Buttons**: Primary action button shows "Decode" or "Encode" based on mode
 
+**Encode Mode - Paste.sh Only:**
+
+- **Strict URL Validation**: Encode mode now only accepts paste.sh URLs
+- **User Guidance**: Clear error messages guide users to paste their content to paste.sh first
+- **Smart Paste Detection**: Warns users when non-paste.sh URLs are pasted in encode mode
+- **Link to paste.sh**: Help tooltip includes direct link to paste.sh service
+
 ## [3.1.2] - 2026-04-18
 
 ### Changed

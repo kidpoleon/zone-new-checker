@@ -914,7 +914,7 @@ export default function HomePage() {
     }
   }
 
-  // URL validation for encoding mode
+  // URL validation for encoding mode - only paste.sh URLs allowed
   function isValidUrl(str: string): boolean {
     try {
       const url = new URL(str.trim());
@@ -924,23 +924,36 @@ export default function HomePage() {
     }
   }
 
-  // Extract URLs from multi-line input (one per line)
-  function extractUrlsFromLines(input: string): { valid: string[]; invalid: number[] } {
+  // Check if URL is a paste.sh URL
+  function isPasteShUrl(str: string): boolean {
+    try {
+      const url = new URL(str.trim());
+      return url.hostname === "paste.sh" || url.hostname.endsWith(".paste.sh");
+    } catch {
+      return false;
+    }
+  }
+
+  // Extract paste.sh URLs from multi-line input (one per line)
+  function extractPasteShUrlsFromLines(input: string): { valid: string[]; invalid: number[]; nonPasteSh: number[] } {
     const lines = input.split("\n").map((line, index) => ({ line: line.trim(), index }));
     const valid: string[] = [];
     const invalid: number[] = [];
+    const nonPasteSh: number[] = [];
     
     for (const { line, index } of lines) {
       if (!line) continue; // Skip empty lines
       
-      if (isValidUrl(line)) {
-        valid.push(line);
-      } else {
+      if (!isValidUrl(line)) {
         invalid.push(index + 1); // 1-based line numbers for user feedback
+      } else if (!isPasteShUrl(line)) {
+        nonPasteSh.push(index + 1); // Track non-paste.sh URLs
+      } else {
+        valid.push(line);
       }
     }
     
-    return { valid, invalid };
+    return { valid, invalid, nonPasteSh };
   }
 
   // Encode text to Base64 (URL-safe)
@@ -960,7 +973,7 @@ export default function HomePage() {
     }
   }
 
-  // Handle Base64 encoding (supports multiple URLs, one per line)
+  // Handle Base64 encoding (supports multiple paste.sh URLs, one per line)
   function handleBase64Encode() {
     // Mark user as having used Base64 feature
     if (typeof window !== "undefined") {
@@ -976,57 +989,70 @@ export default function HomePage() {
     const trimmedInput = base64Input.trim();
     
     if (!trimmedInput) {
-      setBase64Error("Please enter text or URLs to encode");
+      setBase64Error("Please enter paste.sh URLs to encode");
       showToast("Nothing to encode", "error");
       return;
     }
     
-    // Check if input contains multiple lines
-    const hasMultipleLines = trimmedInput.includes("\n");
-    
-    if (hasMultipleLines) {
-      // Multi-line mode: validate each line as URL
-      const { valid, invalid } = extractUrlsFromLines(trimmedInput);
-      
-      if (invalid.length > 0) {
-        const lineStr = invalid.length === 1 ? `line ${invalid[0]}` : `lines ${invalid.join(", ")}`;
-        setBase64Error(`Invalid URL(s) at ${lineStr}. Please enter one valid URL per line.`);
-        showToast(`Invalid URL at ${lineStr}`, "error");
+    // Single line mode
+    if (!trimmedInput.includes("\n")) {
+      // Check if it's a valid URL first
+      if (!isValidUrl(trimmedInput)) {
+        setBase64Error("Invalid URL format. Please enter a valid paste.sh URL.");
+        showToast("Invalid URL format", "error");
         return;
       }
       
-      if (valid.length === 0) {
-        setBase64Error("No valid URLs found. Please enter at least one URL.");
-        showToast("No valid URLs", "error");
+      // Check if it's a paste.sh URL
+      if (!isPasteShUrl(trimmedInput)) {
+        setBase64Error("Only paste.sh URLs are accepted. Please paste your content to paste.sh first, then encode the paste.sh link here.");
+        showToast("Use paste.sh URLs only - paste your content to paste.sh first", "warning");
         return;
       }
       
-      // Encode each URL
-      try {
-        const encodedLines = valid.map((url) => encodeToBase64(url));
-        setBase64Output(encodedLines.join("\n"));
-        showToast(`Encoded ${valid.length} URL${valid.length > 1 ? "s" : ""} successfully!`, "success");
-      } catch (e) {
-        setBase64Error(e instanceof Error ? e.message : "Encoding failed");
-        showToast("Encoding failed", "error");
-      }
-    } else {
-      // Single line mode
-      const isUrl = isValidUrl(trimmedInput);
-      
+      // Encode the paste.sh URL
       try {
         const encoded = encodeToBase64(trimmedInput);
         setBase64Output(encoded);
-        
-        if (isUrl) {
-          showToast("URL encoded successfully!", "success");
-        } else {
-          showToast("Encoded successfully!", "success");
-        }
+        showToast("paste.sh URL encoded successfully!", "success");
       } catch (e) {
         setBase64Error(e instanceof Error ? e.message : "Encoding failed");
         showToast("Encoding failed", "error");
       }
+      return;
+    }
+    
+    // Multi-line mode: validate each line as paste.sh URL
+    const { valid, invalid, nonPasteSh } = extractPasteShUrlsFromLines(trimmedInput);
+    
+    if (invalid.length > 0) {
+      const lineStr = invalid.length === 1 ? `line ${invalid[0]}` : `lines ${invalid.join(", ")}`;
+      setBase64Error(`Invalid URL(s) at ${lineStr}. Please enter one valid paste.sh URL per line.`);
+      showToast(`Invalid URL at ${lineStr}`, "error");
+      return;
+    }
+    
+    if (nonPasteSh.length > 0) {
+      const lineStr = nonPasteSh.length === 1 ? `line ${nonPasteSh[0]}` : `lines ${nonPasteSh.join(", ")}`;
+      setBase64Error(`Non-paste.sh URL(s) at ${lineStr}. Only paste.sh URLs are accepted. Please paste your content to paste.sh first, then encode the paste.sh link here.`);
+      showToast(`Use paste.sh URLs only - paste your content to paste.sh first`, "warning");
+      return;
+    }
+    
+    if (valid.length === 0) {
+      setBase64Error("No valid paste.sh URLs found. Please enter at least one paste.sh URL.");
+      showToast("No valid paste.sh URLs", "error");
+      return;
+    }
+    
+    // Encode each paste.sh URL
+    try {
+      const encodedLines = valid.map((url) => encodeToBase64(url));
+      setBase64Output(encodedLines.join("\n"));
+      showToast(`Encoded ${valid.length} paste.sh URL${valid.length > 1 ? "s" : ""} successfully!`, "success");
+    } catch (e) {
+      setBase64Error(e instanceof Error ? e.message : "Encoding failed");
+      showToast("Encoding failed", "error");
     }
   }
 
@@ -1086,20 +1112,33 @@ export default function HomePage() {
       setBase64Output("");
       setBase64Urls([]);
       
-      // If in encode mode and content looks like URL(s), offer to encode
+      // If in encode mode and content looks like paste.sh URL(s), offer to encode
       if (base64Operation === "encode") {
         const lines = text.split("\n").filter((line) => line.trim());
         const allLinesAreUrls = lines.every((line) => isValidUrl(line.trim()));
+        const allLinesArePasteSh = lines.every((line) => isPasteShUrl(line.trim()));
         
-        if (allLinesAreUrls && lines.length > 0) {
-          // Auto-encode URLs
+        // If URLs are valid but not paste.sh, warn user
+        if (allLinesAreUrls && !allLinesArePasteSh && lines.length > 0) {
+          setBase64Input(text);
+          setHasInput(true);
+          setBase64Error("Only paste.sh URLs are accepted. Please paste your content to paste.sh first, then encode the paste.sh link here.");
+          showToast("Use paste.sh URLs only - paste your content to paste.sh first", "warning");
+          return;
+        }
+        
+        if (allLinesArePasteSh && lines.length > 0) {
+          // Auto-encode paste.sh URLs
           handleBase64Encode();
           return;
         }
         
-        // Single text encode
-        if (lines.length === 1) {
-          handleBase64Encode();
+        // Not valid URLs
+        if (lines.length > 0) {
+          setBase64Input(text);
+          setHasInput(true);
+          setBase64Error("Invalid URL format. Please enter valid paste.sh URLs.");
+          showToast("Invalid URL format", "error");
           return;
         }
         
@@ -2157,7 +2196,7 @@ export default function HomePage() {
             {mode === "base64" && (
               <div className="row" style={{ gap: 12 }}>
                 <div>
-                  <label htmlFor="base64-input">{base64Operation === "decode" ? "INPUT (Base64 to decode)" : "INPUT (Text/URLs to encode)"}</label>
+                  <label htmlFor="base64-input">{base64Operation === "decode" ? "INPUT (Base64 to decode)" : "INPUT (paste.sh URLs to encode)"}</label>
                   
                   {/* First-time user hint tooltip */}
                   {showHint && isFirstTimeUser && (
@@ -2185,7 +2224,7 @@ export default function HomePage() {
                           {base64Operation === "decode" ? (
                             <>Paste a Base64 string here to decode it. It usually starts with <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4 }}>aHR0</code> and ends with <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4 }}>=</code></>
                           ) : (
-                            <>Paste URLs or text here to encode to Base64. Enter one URL per line for multiple URLs.</>
+                            <>Paste <strong>paste.sh</strong> URLs here to encode. Enter one URL per line for multiple URLs. Need to share content? Paste it to <a href="https://paste.sh" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>paste.sh</a> first, then encode the link here.</>
                           )}
                         </div>
                       </div>
@@ -2265,7 +2304,7 @@ export default function HomePage() {
                         handleBase64Process();
                       }
                     }}
-                    placeholder={base64Operation === "decode" ? "Paste Base64 here (starts with aHR0, ends with =)" : "Paste URLs or text here (one URL per line for multiple)"}
+                    placeholder={base64Operation === "decode" ? "Paste Base64 here (starts with aHR0, ends with =)" : "Paste paste.sh URLs here (one per line for multiple)"}
                     rows={4}
                     style={{ 
                       minHeight: 80,
