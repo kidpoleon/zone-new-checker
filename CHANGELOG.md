@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-04-18
+
+### Changed
+
+- **Proactive Verification**: Turnstile widget now appears immediately on page load when verification is required, instead of redirecting to a separate verify page
+- Improved UX flow - users can see verification status before attempting to use features
+- Reduced friction - no jarring redirects between pages
+
+### Added
+
+- New `/api/check-verification` endpoint for checking verification status on mount
+- Inline verification banner with Turnstile widget integrated directly into main UI
+- CSS styling for verification banner (mobile-responsive)
+- Real-time verification feedback with success toast notification
+
+### Technical
+
+- Moved from redirect-based to inline verification pattern
+- Added verification state management in main page component
+- Turnstile callbacks now handled via window object for inline widget
+
 ## [3.0.0] - 2026-04-18
 
 ### 🎉 Major Release - Professional Edition

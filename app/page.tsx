@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Script from "next/script";
 import type { BulkRowResult, CheckResult, Mode, RunMode } from "@/lib/types";
 import {
   normalizeMac,
@@ -186,6 +187,13 @@ export default function HomePage() {
 
   const [viewportH, setViewportH] = useState<number>(0);
 
+  // Proactive verification state
+  const [isVerified, setIsVerified] = useState<boolean | null>(null); // null = checking, false = unverified, true = verified
+  const [turnstileToken, setTurnstileToken] = useState<string>("");
+  const [turnstileError, setTurnstileError] = useState<string>("");
+  const [verifying, setVerifying] = useState(false);
+  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
+
   const canShowSingle = runMode === "single";
 
   const redirectToVerify = useCallback(() => {
@@ -200,13 +208,99 @@ export default function HomePage() {
         abortRef.current?.abort();
         setBusy(false);
         setPlaylistBusy(false);
-        redirectToVerify();
+        // Instead of redirect, show inline verification
+        setIsVerified(false);
+        setTurnstileToken("");
+        setTurnstileError("");
         return true;
       }
       return false;
     },
-    [redirectToVerify]
+    []
   );
+
+  // Check verification status on mount (proactive verification)
+  useEffect(() => {
+    // Skip if no site key configured (local development)
+    if (!siteKey) {
+      setIsVerified(true);
+      return;
+    }
+
+    const checkVerification = async () => {
+      try {
+        const res = await fetch("/api/check-verification");
+        const json = await res.json().catch(() => ({}));
+        setIsVerified(json.verified === true);
+      } catch {
+        // On error, assume unverified to be safe
+        setIsVerified(false);
+      }
+    };
+
+    checkVerification();
+  }, [siteKey]);
+
+  // Handle Turnstile callbacks
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    (window as unknown as Record<string, unknown>).onTurnstileSuccess = (token: string) => {
+      setTurnstileToken(token);
+      setTurnstileError("");
+    };
+    (window as unknown as Record<string, unknown>).onTurnstileError = () => {
+      setTurnstileError("Verification failed to load. Please refresh and try again.");
+      setTurnstileToken("");
+    };
+    (window as unknown as Record<string, unknown>).onTurnstileExpired = () => {
+      setTurnstileError("Verification expired. Please try again.");
+      setTurnstileToken("");
+    };
+    (window as unknown as Record<string, unknown>).onTurnstileTimeout = () => {
+      setTurnstileError("Verification timed out. Please try again.");
+      setTurnstileToken("");
+    };
+
+    return () => {
+      delete (window as unknown as Record<string, unknown>).onTurnstileSuccess;
+      delete (window as unknown as Record<string, unknown>).onTurnstileError;
+      delete (window as unknown as Record<string, unknown>).onTurnstileExpired;
+      delete (window as unknown as Record<string, unknown>).onTurnstileTimeout;
+    };
+  }, []);
+
+  // Submit verification when token is received
+  useEffect(() => {
+    if (!turnstileToken || verifying) return;
+
+    const submitVerification = async () => {
+      setVerifying(true);
+      try {
+        const res = await fetch("/api/verify-human", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
+          body: JSON.stringify({ token: turnstileToken }),
+        });
+        const json = await res.json().catch(() => ({}));
+
+        if (res.ok && json.ok === true) {
+          setIsVerified(true);
+          setTurnstileError("");
+          showToast("Verification successful! You can now use all features.", "success");
+        } else {
+          throw new Error(json.error || "Verification failed.");
+        }
+      } catch (e: unknown) {
+        setTurnstileError(e instanceof Error ? e.message : "Verification failed.");
+        setTurnstileToken("");
+      } finally {
+        setVerifying(false);
+      }
+    };
+
+    submitVerification();
+  }, [turnstileToken, verifying]);
 
   useEffect(() => {
     const update = () => setViewportH(window.innerHeight || 0);
@@ -1630,6 +1724,32 @@ export default function HomePage() {
       </div>
 
       <div className="panel checkerPanel" data-mode={mode}>
+        {/* Inline Turnstile Verification Widget */}
+        {isVerified === false && siteKey && (
+          <>
+            <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer />
+            <div className="verifyBanner">
+              <div className="verifyBannerContent">
+                <div className="verifyBannerText">
+                  <strong>Human Verification Required</strong>
+                  <span>Complete the challenge below to use all features. This helps protect the service from abuse.</span>
+                </div>
+                <div
+                  className="cf-turnstile"
+                  data-sitekey={siteKey}
+                  data-theme="dark"
+                  data-callback="onTurnstileSuccess"
+                  data-error-callback="onTurnstileError"
+                  data-expired-callback="onTurnstileExpired"
+                  data-timeout-callback="onTurnstileTimeout"
+                />
+              </div>
+              {turnstileError && <div className="verifyBannerError">{turnstileError}</div>}
+              {verifying && <div className="verifyBannerLoading">Verifying...</div>}
+            </div>
+          </>
+        )}
+
         <div className="checkerTop">
           <div className="checkerSelectors">
             <div className="segmented triple" aria-label="Provider" data-active={mode}>

@@ -176,3 +176,4 @@ scripts/_local/
 .cache/
 temp/
 tmp/
+.vercel
