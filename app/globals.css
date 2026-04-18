@@ -1277,3 +1277,66 @@ input:focus, textarea:focus {
     font-size: 11px;
   }
 }
+
+/* Animation for first-time hint */
+@keyframes fadeInSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Base64 input focus states with color-coded validation */
+.bulkTextarea.base64-input-valid:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25), 0 0 0 1px rgba(74, 222, 128, 0.6);
+}
+
+.bulkTextarea.base64-input-partial:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25), 0 0 0 1px rgba(251, 191, 36, 0.5);
+}
+
+.bulkTextarea.base64-input-invalid:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.25), 0 0 0 1px rgba(248, 113, 113, 0.5);
+}
+
+.bulkTextarea.base64-input-empty:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus), 0 0 0 1px var(--accent);
+}
+
+/* Enhanced focus indicators for accessibility */
+.btn:focus-visible,
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus), 0 0 0 1px var(--accent);
+}
+
+/* Skip link for keyboard accessibility */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--accent);
+  color: white;
+  padding: 8px;
+  text-decoration: none;
+  z-index: 100;
+}
+
+.skip-link:focus {
+  top: 0;
+}

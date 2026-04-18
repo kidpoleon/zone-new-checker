@@ -123,6 +123,12 @@ export default function HomePage() {
   const [base64Error, setBase64Error] = useState<string>("");
   const [base64Urls, setBase64Urls] = useState<string[]>([]);
   const [hasInput, setHasInput] = useState<boolean>(false);
+  
+  // Smart validation state
+  const [validationStatus, setValidationStatus] = useState<"empty" | "invalid" | "partial" | "valid">("empty");
+  const [detectedType, setDetectedType] = useState<"none" | "base64" | "url" | "xtream" | "stalker">("none");
+  const [isFirstTimeUser, setIsFirstTimeUser] = useState<boolean>(false);
+  const [showHint, setShowHint] = useState<boolean>(false);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
@@ -213,6 +219,86 @@ export default function HomePage() {
 
     checkVerification();
   }, [siteKey]);
+
+  // First-time user detection
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hasUsedBase64 = localStorage.getItem("zone_checker_base64_used");
+    if (!hasUsedBase64) {
+      setIsFirstTimeUser(true);
+      setShowHint(true);
+      // Auto-hide hint after 8 seconds
+      const timer = setTimeout(() => setShowHint(false), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // Smart input validation and type detection
+  useEffect(() => {
+    const trimmed = base64Input.trim();
+    
+    if (!trimmed) {
+      setValidationStatus("empty");
+      setDetectedType("none");
+      return;
+    }
+    
+    // Auto-trim whitespace detection
+    const hasWhitespace = /\s/.test(base64Input);
+    if (hasWhitespace && trimmed !== base64Input) {
+      // Silently clean the input after a brief delay
+      const timer = setTimeout(() => {
+        setBase64Input(trimmed);
+        showToast("Auto-removed extra spaces", "info");
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+    
+    // Detect input type
+    const isUrl = /^https?:\/\//i.test(trimmed);
+    const isXtream = isUrl && (/\/get\.php/i.test(trimmed) || trimmed.includes("username=") || trimmed.includes("password="));
+    const isStalker = isUrl && (/\/c\/|\/portal/i.test(trimmed) || /[a-f0-9]{2}:[a-f0-9]{2}/i.test(trimmed));
+    const isBase64 = /^[A-Za-z0-9+/=_-]+$/.test(trimmed) && trimmed.length >= 4;
+    
+    // Check if valid Base64
+    const isValidBase64 = (str: string): boolean => {
+      try {
+        const normalized = str.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+        atob(padded);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    
+    if (isXtream) {
+      setDetectedType("xtream");
+      setValidationStatus("invalid");
+    } else if (isStalker) {
+      setDetectedType("stalker");
+      setValidationStatus("invalid");
+    } else if (isUrl && !isBase64) {
+      setDetectedType("url");
+      setValidationStatus("invalid");
+    } else if (isBase64) {
+      setDetectedType("base64");
+      if (isValidBase64(trimmed)) {
+        setValidationStatus("valid");
+      } else {
+        // Check if it's close (partial padding issue)
+        const cleanBase64 = trimmed.replace(/[^A-Za-z0-9+/]/g, "");
+        if (cleanBase64.length >= trimmed.length * 0.8) {
+          setValidationStatus("partial");
+        } else {
+          setValidationStatus("invalid");
+        }
+      }
+    } else {
+      setDetectedType("none");
+      setValidationStatus("invalid");
+    }
+  }, [base64Input]);
 
   // Handle Turnstile callbacks
   useEffect(() => {
@@ -804,6 +890,13 @@ export default function HomePage() {
   }
 
   function handleBase64Decode() {
+    // Mark user as having used Base64 feature
+    if (typeof window !== "undefined") {
+      localStorage.setItem("zone_checker_base64_used", "true");
+      setIsFirstTimeUser(false);
+      setShowHint(false);
+    }
+    
     setBase64Error("");
     setBase64Output("");
     setBase64Urls([]);
@@ -811,8 +904,10 @@ export default function HomePage() {
       const result = decodeBase64(base64Input);
       setBase64Output(result.decoded);
       setBase64Urls(result.urls);
+      showToast("Decoded successfully!", "success");
     } catch (e) {
       setBase64Error(e instanceof Error ? e.message : "Decode failed");
+      showToast("Decode failed", "error");
     }
   }
 
@@ -827,6 +922,33 @@ export default function HomePage() {
       const text = await navigator.clipboard.readText();
       if (!text || !text.trim()) {
         setBase64Error("Clipboard is empty.");
+        return;
+      }
+      
+      // Mark user as having used Base64 feature
+      if (typeof window !== "undefined") {
+        localStorage.setItem("zone_checker_base64_used", "true");
+        setIsFirstTimeUser(false);
+      }
+      
+      // Smart detection: check if pasted content is a URL instead of Base64
+      const trimmed = text.trim();
+      const isXtreamUrl = /^https?:\/\//i.test(trimmed) && (/\/get\.php/i.test(trimmed) || trimmed.includes("username="));
+      const isStalkerUrl = /^https?:\/\//i.test(trimmed) && (/\/c\/|\/portal/i.test(trimmed) || /[a-f0-9]{2}:[a-f0-9]{2}/i.test(trimmed));
+      
+      if (isXtreamUrl) {
+        setBase64Input(trimmed);
+        setHasInput(true);
+        setBase64Error("⚠️ This looks like an Xtream URL. Switch to 'Xtream' mode above to check it.");
+        showToast("URL detected - switch to Xtream mode", "warning");
+        return;
+      }
+      
+      if (isStalkerUrl) {
+        setBase64Input(trimmed);
+        setHasInput(true);
+        setBase64Error("⚠️ This looks like a Stalker URL. Switch to 'Stalker' mode above to check it.");
+        showToast("URL detected - switch to Stalker mode", "warning");
         return;
       }
       
@@ -1858,9 +1980,99 @@ export default function HomePage() {
             {mode === "base64" && (
               <div className="row" style={{ gap: 12 }}>
                 <div>
-                  <label>INPUT</label>
+                  <label htmlFor="base64-input">INPUT</label>
+                  
+                  {/* First-time user hint tooltip */}
+                  {showHint && isFirstTimeUser && (
+                    <div 
+                      className="first-time-hint"
+                      role="status"
+                      aria-live="polite"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(19, 141, 224, 0.15), rgba(99, 91, 255, 0.15))",
+                        border: "1px solid rgba(19, 141, 224, 0.35)",
+                        borderRadius: 8,
+                        padding: "12px 16px",
+                        marginBottom: 12,
+                        fontSize: 13,
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                        animation: "fadeInSlide 0.3s ease-out"
+                      }}
+                    >
+                      <span style={{ fontSize: 18 }}>💡</span>
+                      <div>
+                        <strong style={{ color: "var(--accent)" }}>Welcome!</strong>
+                        <div style={{ marginTop: 4, opacity: 0.9 }}>
+                          Paste a Base64 string here to decode it. 
+                          It usually starts with <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4 }}>aHR0</code> and ends with <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4 }}>=</code>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => setShowHint(false)}
+                        style={{ 
+                          marginLeft: "auto", 
+                          background: "none", 
+                          border: "none", 
+                          color: "var(--muted)", 
+                          cursor: "pointer",
+                          fontSize: 16
+                        }}
+                        aria-label="Dismiss hint"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* Type detection warning for wrong mode */}
+                  {detectedType === "xtream" && (
+                    <div 
+                      className="type-warning"
+                      role="alert"
+                      style={{
+                        background: "rgba(251, 191, 36, 0.1)",
+                        border: "1px solid rgba(251, 191, 36, 0.3)",
+                        borderRadius: 6,
+                        padding: "8px 12px",
+                        marginBottom: 8,
+                        fontSize: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        color: "#fbbf24"
+                      }}
+                    >
+                      <span>⚠️</span>
+                      <span>This looks like an <strong>Xtream URL</strong>. <button onClick={() => setMode("xtream")} className="btn small" style={{ padding: "2px 8px", fontSize: 11 }}>Switch to Xtream mode</button></span>
+                    </div>
+                  )}
+                  {detectedType === "stalker" && (
+                    <div 
+                      className="type-warning"
+                      role="alert"
+                      style={{
+                        background: "rgba(251, 191, 36, 0.1)",
+                        border: "1px solid rgba(251, 191, 36, 0.3)",
+                        borderRadius: 6,
+                        padding: "8px 12px",
+                        marginBottom: 8,
+                        fontSize: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        color: "#fbbf24"
+                      }}
+                    >
+                      <span>⚠️</span>
+                      <span>This looks like a <strong>Stalker URL</strong>. <button onClick={() => setMode("stalker")} className="btn small" style={{ padding: "2px 8px", fontSize: 11 }}>Switch to Stalker mode</button></span>
+                    </div>
+                  )}
+                  
                   <textarea
-                    className="bulkTextarea"
+                    id="base64-input"
+                    className={`bulkTextarea base64-input-${validationStatus}`}
                     value={base64Input}
                     onChange={(e) => {
                       setBase64Input(e.target.value);
@@ -1873,13 +2085,90 @@ export default function HomePage() {
                         handleBase64Decode();
                       }
                     }}
-                    placeholder="Paste Base64 here (e.g., aHR0cHM6Ly9wYXN0ZS5zaC8...)"
+                    placeholder="Paste Base64 here (starts with aHR0, ends with =)"
                     rows={4}
-                    style={{ minHeight: 80 }}
+                    style={{ 
+                      minHeight: 80,
+                      // Color-coded validation borders
+                      borderColor: validationStatus === "valid" 
+                        ? "rgba(74, 222, 128, 0.6)" 
+                        : validationStatus === "partial"
+                        ? "rgba(251, 191, 36, 0.5)"
+                        : validationStatus === "invalid" && hasInput
+                        ? "rgba(248, 113, 113, 0.5)"
+                        : undefined,
+                      borderWidth: validationStatus !== "empty" ? "2px" : "1px",
+                      transition: "border-color 0.2s ease, box-shadow 0.2s ease"
+                    }}
                     autoFocus
+                    aria-label="Base64 input field"
+                    aria-describedby={base64Error ? "base64-error" : undefined}
+                    aria-invalid={validationStatus === "invalid"}
                   />
-                  {base64Error ? <div className="fieldError">{base64Error}</div> : null}
+                  
+                  {/* Validation status indicator */}
+                  {validationStatus !== "empty" && (
+                    <div 
+                      className="validation-indicator"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        marginTop: 6,
+                        fontSize: 12,
+                        color: validationStatus === "valid" 
+                          ? "#4ade80" 
+                          : validationStatus === "partial"
+                          ? "#fbbf24"
+                          : "#f87171"
+                      }}
+                      aria-live="polite"
+                    >
+                      {validationStatus === "valid" && (
+                        <>
+                          <span>✓</span>
+                          <span>Valid Base64 - ready to decode</span>
+                        </>
+                      )}
+                      {validationStatus === "partial" && (
+                        <>
+                          <span>◐</span>
+                          <span>Almost there - check for missing characters</span>
+                        </>
+                      )}
+                      {validationStatus === "invalid" && detectedType === "base64" && (
+                        <>
+                          <span>✗</span>
+                          <span>Invalid Base64 - contains non-Base64 characters</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  
+                  {base64Error ? <div id="base64-error" className="fieldError" role="alert">{base64Error}</div> : null}
                 </div>
+
+                {/* Empty state illustration */}
+                {!hasInput && !base64Output && (
+                  <div 
+                    className="empty-state"
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "24px 16px",
+                      opacity: 0.6,
+                      fontSize: 13,
+                      textAlign: "center"
+                    }}
+                    aria-hidden="true"
+                  >
+                    <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.5 }}>🔐</div>
+                    <div style={{ color: "var(--muted)" }}>Paste a Base64 string to decode</div>
+                    <div style={{ fontSize: 11, marginTop: 4, opacity: 0.5 }}>or use Ctrl+V to paste</div>
+                  </div>
+                )}
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {/* Golden Rule #8: Dynamic button reduces cognitive load
@@ -1889,6 +2178,7 @@ export default function HomePage() {
                       className="btn primary"
                       onClick={smartPasteAndDecode}
                       title="Paste from clipboard and auto-decode (Ctrl+V also works)"
+                      aria-label="Paste from clipboard"
                     >
                       Paste
                     </button>
@@ -1896,8 +2186,10 @@ export default function HomePage() {
                     <button
                       className="btn primary"
                       onClick={handleBase64Decode}
-                      disabled={!base64Input.trim()}
-                      title="Decode Base64 (Ctrl+Enter shortcut)"
+                      disabled={validationStatus !== "valid"}
+                      title={validationStatus === "valid" ? "Decode Base64 (Ctrl+Enter shortcut)" : "Enter valid Base64 to decode"}
+                      aria-label="Decode Base64"
+                      aria-disabled={validationStatus !== "valid"}
                     >
                       Decode
                     </button>
@@ -1916,6 +2208,7 @@ export default function HomePage() {
                     }}
                     disabled={!hasInput && !base64Output}
                     title="Clear all fields"
+                    aria-label="Clear all fields"
                   >
                     Clear
                   </button>
@@ -2004,6 +2297,8 @@ export default function HomePage() {
 
             <div style={{ height: 12 }} />
 
+            {/* Controls - Check button only for Xtream/Stalker modes (not Base64) */}
+            {mode !== "base64" && (
             <div className="controls">
               {runMode === "single" ? (
                 <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -2030,8 +2325,9 @@ export default function HomePage() {
                 </div>
               )}
             </div>
+            )}
 
-            {runMode === "bulk" && (bulkTotal > 0 || busy) ? (
+            {mode !== "base64" && runMode === "bulk" && (bulkTotal > 0 || busy) ? (
               <div className="progressRow">
                 <div className="progressBar" aria-label="Progress">
                   <div className="progressFill" style={{ width: `${bulkTotal ? Math.min(100, Math.round((bulkDone / bulkTotal) * 100)) : 0}%` }} />

@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-04-18
+
+### Added
+
+**Smart Base64 Decoder with Full UX Enhancements:**
+
+- **Smart Paste Detection**: Automatically detects if clipboard contains URLs vs Base64
+- **URL Type Detection**: Recognizes Xtream/Stalker URLs and suggests correct mode switch
+- **Auto-Trim Whitespace**: Automatically removes extra spaces and newlines from pasted text
+- **Color-Coded Validation**: Real-time visual feedback (green=valid, yellow=partial, red=invalid)
+- **Validation Status Indicator**: Text feedback showing "Valid Base64 - ready to decode" etc.
+- **First-Time User Onboarding**: Helpful hint tooltip for new users with dismiss button
+- **Empty State Illustration**: Visual guidance when no input is present
+- **Full ARIA Support**: Complete accessibility labels, roles, and live regions
+- **Enhanced Focus Indicators**: Color-coded focus rings matching validation state
+- **Keyboard Shortcuts**: Ctrl+Enter to decode with visible hint
+
+### Technical
+
+- Added state: `validationStatus`, `detectedType`, `isFirstTimeUser`, `showHint`
+- Added effects: first-time detection, smart validation
+- CSS animations: `fadeInSlide`, color-coded focus states
+- localStorage: `zone_checker_base64_used` for first-time tracking
+
 ## [3.0.5] - 2026-04-18
 
 ### Changed
