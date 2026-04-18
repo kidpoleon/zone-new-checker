@@ -82,11 +82,15 @@ function isShortLink(url: string): boolean {
 }
 
 /**
- * Clean Reddit URL by removing tracking parameters
+ * Clean Reddit URL by removing tracking parameters and converting to old.reddit.com
  */
 function cleanRedditUrl(url: string): string {
   try {
     const urlObj = new URL(url);
+    // Convert to old.reddit.com for better API access
+    if (urlObj.hostname === "www.reddit.com" || urlObj.hostname === "reddit.com") {
+      urlObj.hostname = "old.reddit.com";
+    }
     // Remove common tracking parameters
     const trackingParams = [
       "utm_source", "utm_medium", "utm_name", "utm_term", "utm_content",
@@ -96,6 +100,45 @@ function cleanRedditUrl(url: string): string {
     return urlObj.toString();
   } catch {
     return url;
+  }
+}
+
+/**
+ * Fetch Reddit JSON with enhanced browser headers
+ */
+async function fetchRedditJson(url: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  // Enhanced headers to mimic a real browser
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://old.reddit.com/",
+    "Origin": "https://old.reddit.com",
+    "DNT": "1",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "no-cache",
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return response;
+  } catch (e) {
+    clearTimeout(timeout);
+    throw e;
   }
 }
 
@@ -209,117 +252,121 @@ export async function POST(req: Request) {
   const cleanUrl = cleanRedditUrl(url);
   const jsonUrl = cleanUrl.replace(/\/?$/, "/") + ".json";
 
-  // Fetch Reddit JSON
+  // Fetch Reddit JSON with fallback logic
+  let response: Response;
+  let lastError: Error | null = null;
+  
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-    const response = await fetch(jsonUrl, {
-      method: "GET",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; ZoneNewChecker/1.0; +https://github.com)",
-        "Accept": "application/json",
-      },
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      let errorMsg = `Reddit API returned ${response.status}`;
-      if (response.status === 404) {
-        errorMsg = "Post not found. It may have been deleted or the URL is incorrect.";
-      } else if (response.status === 403) {
-        errorMsg = "Access denied. The post may be private or require authentication.";
-      } else if (response.status === 429) {
-        errorMsg = "Reddit rate limit exceeded. Please wait a minute and try again.";
-      } else if (response.status >= 500) {
-        errorMsg = "Reddit servers are having issues. Please try again later.";
-      }
+    // Try old.reddit.com first (usually works better for public API)
+    response = await fetchRedditJson(jsonUrl);
+  } catch (e) {
+    lastError = e instanceof Error ? e : new Error("Unknown error");
+    
+    // Fallback: try www.reddit.com if old.reddit.com fails
+    try {
+      const wwwUrl = jsonUrl.replace("old.reddit.com", "www.reddit.com");
+      response = await fetchRedditJson(wwwUrl);
+    } catch (e2) {
+      // Both attempts failed
       return NextResponse.json(
-        { ok: false, error: errorMsg },
+        { ok: false, error: `Failed to fetch Reddit: ${lastError.message}. Reddit may be blocking API access. Try again later or use the Decode feature with the Base64 text directly.` },
         { status: 502 }
       );
     }
-
-    let data: unknown;
-    try {
-      data = await response.json();
-    } catch {
-      return NextResponse.json({ ok: false, error: "Failed to parse Reddit response. The API may have changed or the post is not accessible." }, { status: 502 });
-    }
-    
-    if (!Array.isArray(data) || data.length < 1) {
-      return NextResponse.json({ ok: false, error: "Invalid Reddit response format. The post structure may have changed or the post is not accessible via API." }, { status: 502 });
-    }
-
-    // Extract text from post and metadata
-    let allText = "";
-    let postMeta: { author?: string; createdUtc?: number; title?: string; subreddit?: string } = {};
-    
-    // Post data is in first element
-    const postListing = data[0] as Record<string, unknown>;
-    if (typeof postListing.data === "object" && postListing.data !== null) {
-      const listingData = postListing.data as Record<string, unknown>;
-      if (Array.isArray(listingData.children) && listingData.children.length > 0) {
-        const post = listingData.children[0] as Record<string, unknown>;
-        const postData = post.data as Record<string, unknown>;
-        
-        // Extract post content
-        if (typeof postData.selftext === "string") {
-          allText += " " + postData.selftext;
-        }
-        if (typeof postData.title === "string") {
-          allText += " " + postData.title;
-          postMeta.title = postData.title;
-        }
-        
-        // Extract metadata
-        if (typeof postData.author === "string") {
-          postMeta.author = postData.author;
-        }
-        if (typeof postData.created_utc === "number") {
-          postMeta.createdUtc = postData.created_utc;
-        }
-        if (typeof postData.subreddit === "string") {
-          postMeta.subreddit = postData.subreddit;
-        }
-      }
-    }
-    
-    // Extract text from comments (second element)
-    if (data.length > 1) {
-      const commentsListing = data[1] as Record<string, unknown>;
-      if (typeof commentsListing.data === "object" && commentsListing.data !== null) {
-        const listingData = commentsListing.data as Record<string, unknown>;
-        if (Array.isArray(listingData.children)) {
-          allText += extractFromComments(listingData.children);
-        }
-      }
-    }
-
-    // Extract Base64 strings
-    const base64Strings = extractBase64Strings(allText);
-    
-    // Remove duplicates while preserving order
-    const seen = new Set<string>();
-    const uniqueBase64: string[] = [];
-    for (const str of base64Strings) {
-      if (!seen.has(str)) {
-        seen.add(str);
-        uniqueBase64.push(str);
-      }
-    }
-
-    return NextResponse.json({
-      ok: true,
-      url: cleanUrl,
-      base64Strings: uniqueBase64,
-      count: uniqueBase64.length,
-      meta: postMeta,
-    });
-  } catch (e: unknown) {
-    const errorMsg = e instanceof Error ? e.message : "Failed to fetch Reddit content";
-    return NextResponse.json({ ok: false, error: errorMsg }, { status: 502 });
   }
+
+  if (!response.ok) {
+    let errorMsg = `Reddit API returned ${response.status}`;
+    if (response.status === 404) {
+      errorMsg = "Post not found. It may have been deleted or the URL is incorrect.";
+    } else if (response.status === 403) {
+      errorMsg = "Reddit is blocking API access. This usually means the post requires authentication, Reddit is rate-limiting requests, or the API has changed. Try copying the Base64 text directly and use the Decode feature.";
+    } else if (response.status === 429) {
+      errorMsg = "Reddit rate limit exceeded. Please wait a minute and try again.";
+    } else if (response.status >= 500) {
+      errorMsg = "Reddit servers are having issues. Please try again later.";
+    }
+    return NextResponse.json(
+      { ok: false, error: errorMsg },
+      { status: 502 }
+    );
+  }
+
+  // Parse successful response
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "Failed to parse Reddit response. The API may have changed or the post is not accessible." }, { status: 502 });
+  }
+  
+  if (!Array.isArray(data) || data.length < 1) {
+    return NextResponse.json({ ok: false, error: "Invalid Reddit response format. The post structure may have changed or the post is not accessible via API." }, { status: 502 });
+  }
+
+  // Extract text from post and metadata
+  let allText = "";
+  let postMeta: { author?: string; createdUtc?: number; title?: string; subreddit?: string } = {};
+  
+  // Post data is in first element
+  const postListing = data[0] as Record<string, unknown>;
+  if (typeof postListing.data === "object" && postListing.data !== null) {
+    const listingData = postListing.data as Record<string, unknown>;
+    if (Array.isArray(listingData.children) && listingData.children.length > 0) {
+      const post = listingData.children[0] as Record<string, unknown>;
+      const postData = post.data as Record<string, unknown>;
+      
+      // Extract post content
+      if (typeof postData.selftext === "string") {
+        allText += " " + postData.selftext;
+      }
+      if (typeof postData.title === "string") {
+        allText += " " + postData.title;
+        postMeta.title = postData.title;
+      }
+      
+      // Extract metadata
+      if (typeof postData.author === "string") {
+        postMeta.author = postData.author;
+      }
+      if (typeof postData.created_utc === "number") {
+        postMeta.createdUtc = postData.created_utc;
+      }
+      if (typeof postData.subreddit === "string") {
+        postMeta.subreddit = postData.subreddit;
+      }
+    }
+  }
+  
+  // Extract text from comments (second element)
+  if (data.length > 1) {
+    const commentsListing = data[1] as Record<string, unknown>;
+    if (typeof commentsListing.data === "object" && commentsListing.data !== null) {
+      const listingData = commentsListing.data as Record<string, unknown>;
+      if (Array.isArray(listingData.children)) {
+        allText += extractFromComments(listingData.children);
+      }
+    }
+  }
+
+  // Extract Base64 strings
+  const base64Strings = extractBase64Strings(allText);
+  
+  // Remove duplicates while preserving order
+  const seen = new Set<string>();
+  const uniqueBase64: string[] = [];
+  for (const str of base64Strings) {
+    if (!seen.has(str)) {
+      seen.add(str);
+      uniqueBase64.push(str);
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    url: cleanUrl,
+    base64Strings: uniqueBase64,
+    count: uniqueBase64.length,
+    meta: postMeta,
+  });
 }

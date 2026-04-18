@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-04-18
+
+### Fixed
+
+- **Reddit API 403 Error**: Resolved "Access denied" error when fetching Reddit posts
+- **Old Reddit Domain**: Automatically converts URLs to `old.reddit.com` for better API access
+- **Enhanced Headers**: Added browser-like headers (Accept-Language, Referer, Origin, Sec-Fetch, etc.) to bypass Reddit's blocking
+- **Fallback Logic**: If old.reddit.com fails, automatically tries www.reddit.com as backup
+- **Better Error Messages**: More descriptive errors explaining Reddit's API restrictions and suggesting alternative approaches
+
+### Technical
+
+- Added `fetchRedditJson()` helper with realistic browser headers
+- Updated `cleanRedditUrl()` to convert domains to old.reddit.com
+- Implemented try/catch with fallback between old and www domains
+- Added proper timeout handling for both fetch attempts
+
 ## [3.0.1] - 2026-04-18
 
 ### Changed
