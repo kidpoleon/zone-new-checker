@@ -2,7 +2,7 @@
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Script from "next/script";
-import type { BulkRowResult, CheckResult, Mode, RunMode } from "@/lib/types";
+import type { Base64Operation, BulkRowResult, CheckResult, Mode, RunMode } from "@/lib/types";
 import {
   normalizeMac,
   normalizeStalkerUrl,
@@ -129,6 +129,9 @@ export default function HomePage() {
   const [detectedType, setDetectedType] = useState<"none" | "base64" | "url" | "xtream" | "stalker">("none");
   const [isFirstTimeUser, setIsFirstTimeUser] = useState<boolean>(false);
   const [showHint, setShowHint] = useState<boolean>(false);
+  
+  // Base64 operation mode (decode/encode)
+  const [base64Operation, setBase64Operation] = useState<Base64Operation>("decode");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
@@ -911,12 +914,137 @@ export default function HomePage() {
     }
   }
 
+  // URL validation for encoding mode
+  function isValidUrl(str: string): boolean {
+    try {
+      const url = new URL(str.trim());
+      return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  // Extract URLs from multi-line input (one per line)
+  function extractUrlsFromLines(input: string): { valid: string[]; invalid: number[] } {
+    const lines = input.split("\n").map((line, index) => ({ line: line.trim(), index }));
+    const valid: string[] = [];
+    const invalid: number[] = [];
+    
+    for (const { line, index } of lines) {
+      if (!line) continue; // Skip empty lines
+      
+      if (isValidUrl(line)) {
+        valid.push(line);
+      } else {
+        invalid.push(index + 1); // 1-based line numbers for user feedback
+      }
+    }
+    
+    return { valid, invalid };
+  }
+
+  // Encode text to Base64 (URL-safe)
+  function encodeToBase64(text: string): string {
+    // Use btoa for basic encoding, handle UTF-8 properly
+    try {
+      // For UTF-8 support, encode to bytes first
+      const utf8Bytes = new TextEncoder().encode(text);
+      const binaryString = Array.from(utf8Bytes)
+        .map((byte) => String.fromCharCode(byte))
+        .join("");
+      const base64 = btoa(binaryString);
+      // Convert to URL-safe Base64 (replace + with -, / with _, remove padding)
+      return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    } catch (e) {
+      throw new Error("Failed to encode to Base64: " + (e instanceof Error ? e.message : "Unknown error"));
+    }
+  }
+
+  // Handle Base64 encoding (supports multiple URLs, one per line)
+  function handleBase64Encode() {
+    // Mark user as having used Base64 feature
+    if (typeof window !== "undefined") {
+      localStorage.setItem("zone_checker_base64_used", "true");
+      setIsFirstTimeUser(false);
+      setShowHint(false);
+    }
+    
+    setBase64Error("");
+    setBase64Output("");
+    setBase64Urls([]);
+    
+    const trimmedInput = base64Input.trim();
+    
+    if (!trimmedInput) {
+      setBase64Error("Please enter text or URLs to encode");
+      showToast("Nothing to encode", "error");
+      return;
+    }
+    
+    // Check if input contains multiple lines
+    const hasMultipleLines = trimmedInput.includes("\n");
+    
+    if (hasMultipleLines) {
+      // Multi-line mode: validate each line as URL
+      const { valid, invalid } = extractUrlsFromLines(trimmedInput);
+      
+      if (invalid.length > 0) {
+        const lineStr = invalid.length === 1 ? `line ${invalid[0]}` : `lines ${invalid.join(", ")}`;
+        setBase64Error(`Invalid URL(s) at ${lineStr}. Please enter one valid URL per line.`);
+        showToast(`Invalid URL at ${lineStr}`, "error");
+        return;
+      }
+      
+      if (valid.length === 0) {
+        setBase64Error("No valid URLs found. Please enter at least one URL.");
+        showToast("No valid URLs", "error");
+        return;
+      }
+      
+      // Encode each URL
+      try {
+        const encodedLines = valid.map((url) => encodeToBase64(url));
+        setBase64Output(encodedLines.join("\n"));
+        showToast(`Encoded ${valid.length} URL${valid.length > 1 ? "s" : ""} successfully!`, "success");
+      } catch (e) {
+        setBase64Error(e instanceof Error ? e.message : "Encoding failed");
+        showToast("Encoding failed", "error");
+      }
+    } else {
+      // Single line mode
+      const isUrl = isValidUrl(trimmedInput);
+      
+      try {
+        const encoded = encodeToBase64(trimmedInput);
+        setBase64Output(encoded);
+        
+        if (isUrl) {
+          showToast("URL encoded successfully!", "success");
+        } else {
+          showToast("Encoded successfully!", "success");
+        }
+      } catch (e) {
+        setBase64Error(e instanceof Error ? e.message : "Encoding failed");
+        showToast("Encoding failed", "error");
+      }
+    }
+  }
+
+  // Main handler that routes to decode or encode based on mode
+  function handleBase64Process() {
+    if (base64Operation === "decode") {
+      handleBase64Decode();
+    } else {
+      handleBase64Encode();
+    }
+  }
+
   function openInPasteSh(urlToOpen?: string) {
     const targetUrl = urlToOpen || "https://paste.sh";
     window.open(targetUrl, "_blank", "noopener,noreferrer");
   }
 
-  // Smart paste handler - detects if clipboard has content and auto-decodes if it's valid Base64
+  // Smart paste handler - detects content type and auto-processes based on operation mode
   async function smartPasteAndDecode() {
     try {
       const text = await navigator.clipboard.readText();
@@ -958,7 +1086,28 @@ export default function HomePage() {
       setBase64Output("");
       setBase64Urls([]);
       
-      // Auto-decode if valid Base64 detected
+      // If in encode mode and content looks like URL(s), offer to encode
+      if (base64Operation === "encode") {
+        const lines = text.split("\n").filter((line) => line.trim());
+        const allLinesAreUrls = lines.every((line) => isValidUrl(line.trim()));
+        
+        if (allLinesAreUrls && lines.length > 0) {
+          // Auto-encode URLs
+          handleBase64Encode();
+          return;
+        }
+        
+        // Single text encode
+        if (lines.length === 1) {
+          handleBase64Encode();
+          return;
+        }
+        
+        showToast("Pasted from clipboard! Press Encode to convert.", "info");
+        return;
+      }
+      
+      // Decode mode: Auto-decode if valid Base64 detected
       try {
         const result = decodeBase64(text);
         setBase64Output(result.decoded);
@@ -1881,6 +2030,34 @@ export default function HomePage() {
                 </button>
               </div>
             )}
+
+            {mode === "base64" && (
+              <div className="segmented" aria-label="Base64 operation" data-active={base64Operation === "decode" ? "left" : "right"}>
+                <span className="segmentedIndicator" aria-hidden="true" />
+                <button 
+                  type="button" 
+                  data-active={base64Operation === "decode"} 
+                  onClick={() => {
+                    setBase64Operation("decode");
+                    setBase64Error("");
+                    setBase64Output("");
+                  }}
+                >
+                  Decode
+                </button>
+                <button 
+                  type="button" 
+                  data-active={base64Operation === "encode"} 
+                  onClick={() => {
+                    setBase64Operation("encode");
+                    setBase64Error("");
+                    setBase64Output("");
+                  }}
+                >
+                  Encode
+                </button>
+              </div>
+            )}
           </div>
 
           {mode !== "base64" && (
@@ -1980,7 +2157,7 @@ export default function HomePage() {
             {mode === "base64" && (
               <div className="row" style={{ gap: 12 }}>
                 <div>
-                  <label htmlFor="base64-input">INPUT</label>
+                  <label htmlFor="base64-input">{base64Operation === "decode" ? "INPUT (Base64 to decode)" : "INPUT (Text/URLs to encode)"}</label>
                   
                   {/* First-time user hint tooltip */}
                   {showHint && isFirstTimeUser && (
@@ -2005,8 +2182,11 @@ export default function HomePage() {
                       <div>
                         <strong style={{ color: "var(--accent)" }}>Welcome!</strong>
                         <div style={{ marginTop: 4, opacity: 0.9 }}>
-                          Paste a Base64 string here to decode it. 
-                          It usually starts with <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4 }}>aHR0</code> and ends with <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4 }}>=</code>
+                          {base64Operation === "decode" ? (
+                            <>Paste a Base64 string here to decode it. It usually starts with <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4 }}>aHR0</code> and ends with <code style={{ background: "rgba(255,255,255,0.1)", padding: "2px 6px", borderRadius: 4 }}>=</code></>
+                          ) : (
+                            <>Paste URLs or text here to encode to Base64. Enter one URL per line for multiple URLs.</>
+                          )}
                         </div>
                       </div>
                       <button 
@@ -2026,8 +2206,8 @@ export default function HomePage() {
                     </div>
                   )}
                   
-                  {/* Type detection warning for wrong mode */}
-                  {detectedType === "xtream" && (
+                  {/* Type detection warning for wrong mode - only in decode mode */}
+                  {base64Operation === "decode" && detectedType === "xtream" && (
                     <div 
                       className="type-warning"
                       role="alert"
@@ -2048,7 +2228,7 @@ export default function HomePage() {
                       <span>This looks like an <strong>Xtream URL</strong>. <button onClick={() => setMode("xtream")} className="btn small" style={{ padding: "2px 8px", fontSize: 11 }}>Switch to Xtream mode</button></span>
                     </div>
                   )}
-                  {detectedType === "stalker" && (
+                  {base64Operation === "decode" && detectedType === "stalker" && (
                     <div 
                       className="type-warning"
                       role="alert"
@@ -2079,13 +2259,13 @@ export default function HomePage() {
                       setHasInput(!!e.target.value.trim());
                     }}
                     onKeyDown={(e) => {
-                      // Golden Rule #2: Keyboard shortcut - Ctrl+Enter to decode
+                      // Golden Rule #2: Keyboard shortcut - Ctrl+Enter to process
                       if (e.ctrlKey && e.key === "Enter" && base64Input.trim()) {
                         e.preventDefault();
-                        handleBase64Decode();
+                        handleBase64Process();
                       }
                     }}
-                    placeholder="Paste Base64 here (starts with aHR0, ends with =)"
+                    placeholder={base64Operation === "decode" ? "Paste Base64 here (starts with aHR0, ends with =)" : "Paste URLs or text here (one URL per line for multiple)"}
                     rows={4}
                     style={{ 
                       minHeight: 80,
@@ -2106,8 +2286,8 @@ export default function HomePage() {
                     aria-invalid={validationStatus === "invalid"}
                   />
                   
-                  {/* Validation status indicator */}
-                  {validationStatus !== "empty" && (
+                  {/* Validation status indicator - only for decode mode */}
+                  {base64Operation === "decode" && validationStatus !== "empty" && (
                     <div 
                       className="validation-indicator"
                       style={{
@@ -2150,12 +2330,12 @@ export default function HomePage() {
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {/* Golden Rule #8: Dynamic button reduces cognitive load
-                      Shows "Paste" when empty, "Decode" when filled */}
+                      Shows "Paste" when empty, "Decode/Encode" when filled */}
                   {!hasInput ? (
                     <button
                       className="btn primary"
                       onClick={smartPasteAndDecode}
-                      title="Paste from clipboard and auto-decode (Ctrl+V also works)"
+                      title={base64Operation === "decode" ? "Paste from clipboard and auto-decode (Ctrl+V also works)" : "Paste from clipboard (Ctrl+V also works)"}
                       aria-label="Paste from clipboard"
                     >
                       Paste
@@ -2163,13 +2343,13 @@ export default function HomePage() {
                   ) : (
                     <button
                       className="btn primary"
-                      onClick={handleBase64Decode}
-                      disabled={validationStatus !== "valid"}
-                      title={validationStatus === "valid" ? "Decode Base64 (Ctrl+Enter shortcut)" : "Enter valid Base64 to decode"}
-                      aria-label="Decode Base64"
-                      aria-disabled={validationStatus !== "valid"}
+                      onClick={handleBase64Process}
+                      disabled={base64Operation === "decode" && validationStatus !== "valid"}
+                      title={base64Operation === "decode" ? (validationStatus === "valid" ? "Decode Base64 (Ctrl+Enter shortcut)" : "Enter valid Base64 to decode") : "Encode to Base64 (Ctrl+Enter shortcut)"}
+                      aria-label={base64Operation === "decode" ? "Decode Base64" : "Encode to Base64"}
+                      aria-disabled={base64Operation === "decode" && validationStatus !== "valid"}
                     >
-                      Decode
+                      {base64Operation === "decode" ? "Decode" : "Encode"}
                     </button>
                   )}
                   
@@ -2194,7 +2374,7 @@ export default function HomePage() {
 
                 {base64Output && (
                   <div style={{ marginTop: 4 }}>
-                    <label>DECODED</label>
+                    <label>{base64Operation === "decode" ? "DECODED" : "ENCODED"}</label>
                     <textarea
                       className="bulkTextarea"
                       value={base64Output}

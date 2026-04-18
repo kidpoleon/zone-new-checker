@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+**Base64 Encode/Decode Toggle:**
+
+- **Dual Mode Support**: Added segmented control to switch between Decode and Encode modes
+- **Base64 Encoding**: Encode text and URLs to Base64 format
+- **Multi-URL Support**: Handle multiple URLs (one per line) with individual validation
+- **URL Validation**: Validates each line as a proper URL before encoding
+- **Smart Paste in Encode Mode**: Auto-detects URLs and offers to encode immediately
+- **Error Line Reporting**: Reports specific line numbers for invalid URLs
+- **URL-Safe Base64**: Uses URL-safe encoding (replaces + with -, / with _)
+- **Paste.sh Compatibility**: Optimized for encoding paste.sh links
+
+### Changed
+
+**Base64 UI Improvements:**
+
+- **Dynamic Labels**: Input/output labels change based on selected operation
+- **Contextual Placeholders**: Different placeholder text for decode vs encode modes
+- **Conditional Validation**: Color-coded validation only shown in decode mode
+- **Operation-Aware Buttons**: Primary action button shows "Decode" or "Encode" based on mode
+
 ## [3.1.2] - 2026-04-18
 
 ### Changed

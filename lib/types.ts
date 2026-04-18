@@ -1,5 +1,6 @@
 export type Mode = "xtream" | "stalker" | "base64";
 export type RunMode = "single" | "bulk";
+export type Base64Operation = "decode" | "encode";
 
 export type CheckResult = {
   ok: boolean;
