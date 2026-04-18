@@ -890,6 +890,39 @@ export default function HomePage() {
     }
   }
 
+  // Client-side fallback: Open Reddit post in new tab and guide user to copy-paste
+  function openRedditForManualCopy(url: string) {
+    // Clean the URL for viewing
+    let cleanUrl = url.trim();
+    if (!cleanUrl.startsWith("http")) {
+      cleanUrl = "https://" + cleanUrl;
+    }
+    // Remove tracking parameters for cleaner URL
+    try {
+      const urlObj = new URL(cleanUrl);
+      ["utm_source", "utm_medium", "utm_name", "utm_term", "utm_content"].forEach(p => urlObj.searchParams.delete(p));
+      cleanUrl = urlObj.toString();
+    } catch {
+      // Keep original if parsing fails
+    }
+    
+    setBase64Error(
+      "Reddit API access is restricted. Opening post in new tab...\n\n" +
+      "📋 Manual Instructions:\n" +
+      "1. Find the Base64 text in the Reddit post (looks like: aHR0cHM6Ly9wYXN0ZS5zaC8... )\n" +
+      "2. Copy the entire Base64 string\n" +
+      "3. Paste it here and click Decode\n\n" +
+      "The Base64 usually starts with 'aHR0' and ends with '='"
+    );
+    
+    // Open in new tab after short delay so user sees the message
+    setTimeout(() => {
+      window.open(cleanUrl, "_blank", "noopener,noreferrer");
+    }, 500);
+    
+    showToast("Opening Reddit post - copy the Base64 text and paste here", "info");
+  }
+
   const filteredXtreamChannels = useMemo(() => {
     const q = xtreamSearchDebounced.trim().toLowerCase();
     if (!q) return xtreamChannels;
@@ -1942,7 +1975,20 @@ export default function HomePage() {
                         background: "rgba(255, 69, 0, 0.15)", 
                         borderColor: "rgba(255, 69, 0, 0.35)" 
                       }}
-                      onClick={() => fetchRedditPost(base64Input.trim())}
+                      onClick={async () => {
+                        const url = base64Input.trim();
+                        // Try API first
+                        await fetchRedditPost(url);
+                        // If error occurred, offer manual fallback
+                        if (base64Error && base64Error.includes("Reddit")) {
+                          // Wait a moment then offer manual copy option
+                          setTimeout(() => {
+                            if (window.confirm("Reddit API is blocked. Would you like to open the post in a new tab to manually copy the Base64 text?")) {
+                              openRedditForManualCopy(url);
+                            }
+                          }, 100);
+                        }
+                      }}
                       disabled={fetchingReddit}
                     >
                       {fetchingReddit ? (
@@ -1952,6 +1998,22 @@ export default function HomePage() {
                       ) : (
                         "Fetch from Reddit"
                       )}
+                    </button>
+                  )}
+                  
+                  {/* Manual copy helper button */}
+                  {hasRedditUrl && (
+                    <button
+                      className="btn"
+                      style={{ 
+                        background: "rgba(251, 191, 36, 0.15)", 
+                        borderColor: "rgba(251, 191, 36, 0.35)",
+                        fontSize: 12
+                      }}
+                      onClick={() => openRedditForManualCopy(base64Input.trim())}
+                      title="Open Reddit post to manually copy Base64"
+                    >
+                      Open Reddit ↗
                     </button>
                   )}
                   

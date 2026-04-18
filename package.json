@@ -1,6 +1,6 @@
 {
   "name": "zone-new-checker",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "description": "Professional IPTV credential validator with Base64 decoding and Reddit integration",
   "private": true,
   "author": "Zone New Team",

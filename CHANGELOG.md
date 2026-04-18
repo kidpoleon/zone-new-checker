@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [3.0.3] - 2026-04-18
+
+### Changed
+
+- **Reddit Fetch Fallback**: When Reddit API is blocked, app now offers to open the post in a new tab
+- **Manual Copy Helper**: Added "Open Reddit ↗" button for easy access to manually copy Base64 text
+- **Improved UX**: Clear instructions shown when automatic fetching fails
+- **Better Error Messages**: Step-by-step guide for manual Base64 extraction
+
+### Technical
+
+- Added `openRedditForManualCopy()` helper function
+- Updated Fetch button to detect API failures and offer manual fallback
+- Added confirmation dialog before opening external link
+- Maintains API attempt first (in case Reddit unblocks in future)
+
 ## [3.0.2] - 2026-04-18
 
 ### Fixed
