@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [3.0.5] - 2026-04-18
+
+### Changed
+
+**Schneidermann's Golden Rules of Interface Design Implementation:**
+
+1. **Consistency** - Unified button styling and behavior patterns
+2. **Shortcuts** - Added Ctrl+Enter keyboard shortcut for power users
+3. **Feedback** - Enhanced toast notifications for all user actions
+4. **Closure** - Visual feedback when decode completes successfully
+5. **Error Handling** - Clear, actionable error messages with recovery options
+6. **Reversal** - Clear button provides easy reset with confirmation toast
+7. **Control** - Users have explicit control via keyboard and mouse
+8. **Memory Load** - Dynamic button reduces cognitive load ( Paste → Decode )
+
+**UI Improvements:**
+- **Dynamic Primary Button**: Shows "Paste" when empty, "Decode" when filled
+- **Removed Redundant Decode Button**: Single primary action reduces confusion
+- **Keyboard Shortcuts**: Ctrl+Enter to decode (power user feature)
+- **Auto-focus**: Input field auto-focused on Base64 mode selection
+- **Tooltips**: Added title attributes for accessibility and guidance
+- **Clear Button**: Only enabled when there's content to clear
+
+### Technical
+
+- Updated `smartPasteAndDecode()` to set `hasInput` state
+- Added `onKeyDown` handler for Ctrl+Enter shortcut
+- Simplified button layout (2 buttons instead of 3)
+- Enhanced toast feedback for all actions
+
 ## [3.0.4] - 2026-04-18
 
 ### Removed

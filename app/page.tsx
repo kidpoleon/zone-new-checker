@@ -831,6 +831,7 @@ export default function HomePage() {
       }
       
       setBase64Input(text);
+      setHasInput(true);
       setBase64Error("");
       setBase64Output("");
       setBase64Urls([]);
@@ -843,10 +844,11 @@ export default function HomePage() {
         showToast("Pasted and decoded successfully!", "success");
       } catch {
         // Not valid Base64, just show pasted confirmation
-        showToast("Pasted from clipboard!", "success");
+        showToast("Pasted from clipboard!", "info");
       }
     } catch {
       setBase64Error("Could not access clipboard. Please paste manually.");
+      showToast("Clipboard access denied", "error");
     }
   }
 
@@ -1864,40 +1866,56 @@ export default function HomePage() {
                       setBase64Input(e.target.value);
                       setHasInput(!!e.target.value.trim());
                     }}
-                    placeholder="Paste Base64 string here (starts with aHR0, ends with =)"
+                    onKeyDown={(e) => {
+                      // Golden Rule #2: Keyboard shortcut - Ctrl+Enter to decode
+                      if (e.ctrlKey && e.key === "Enter" && base64Input.trim()) {
+                        e.preventDefault();
+                        handleBase64Decode();
+                      }
+                    }}
+                    placeholder="Paste Base64 here (e.g., aHR0cHM6Ly9wYXN0ZS5zaC8...)"
                     rows={4}
                     style={{ minHeight: 80 }}
+                    autoFocus
                   />
                   {base64Error ? <div className="fieldError">{base64Error}</div> : null}
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {/* Smart Paste button - auto-decodes if valid Base64 */}
-                  <button
-                    className="btn primary"
-                    onClick={smartPasteAndDecode}
-                  >
-                    Paste & Decode
-                  </button>
+                  {/* Golden Rule #8: Dynamic button reduces cognitive load
+                      Shows "Paste" when empty, "Decode" when filled */}
+                  {!hasInput ? (
+                    <button
+                      className="btn primary"
+                      onClick={smartPasteAndDecode}
+                      title="Paste from clipboard and auto-decode (Ctrl+V also works)"
+                    >
+                      Paste
+                    </button>
+                  ) : (
+                    <button
+                      className="btn primary"
+                      onClick={handleBase64Decode}
+                      disabled={!base64Input.trim()}
+                      title="Decode Base64 (Ctrl+Enter shortcut)"
+                    >
+                      Decode
+                    </button>
+                  )}
                   
-                  {/* Decode button - for manual input */}
+                  {/* Golden Rule #6: Easy reversal - Clear button always available */}
                   <button
                     className="btn"
-                    onClick={handleBase64Decode}
-                    disabled={!base64Input.trim()}
-                  >
-                    Decode
-                  </button>
-                  
-                  <button
-                    className="btn danger"
                     onClick={() => {
                       setBase64Input("");
                       setBase64Output("");
                       setBase64Error("");
                       setBase64Urls([]);
                       setHasInput(false);
+                      showToast("Cleared", "info");
                     }}
+                    disabled={!hasInput && !base64Output}
+                    title="Clear all fields"
                   >
                     Clear
                   </button>
