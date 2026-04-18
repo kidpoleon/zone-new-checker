@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [3.0.4] - 2026-04-18
+
+### Removed
+
+- **Reddit Integration Removed**: Completely removed "Fetch from Reddit" and "Open Reddit" functionality
+- Reddit API access is permanently blocked by Reddit's anti-bot measures
+- All Reddit-related state variables, functions, and UI elements removed
+
+### Changed
+
+- **Simplified Base64 Decoder UI**: Cleaner interface with only essential buttons
+- **Smart "Paste & Decode" Button**: New primary action that pastes from clipboard and auto-decodes if valid Base64
+- **Updated Placeholder**: Simple, clear instruction "Paste Base64 string here (starts with aHR0, ends with =)"
+- **Cleaner Output**: Removed Reddit metadata display from decoded output
+
+### Technical
+
+- Removed: `fetchRedditPost()`, `openRedditForManualCopy()`, `hasRedditUrl`, `redditBase64List`, `redditMeta`, `fetchingReddit`
+- Added: `smartPasteAndDecode()` for combined paste+decode action
+- Simplified Base64 mode state management
+
 ## [3.0.3] - 2026-04-18
 
 ### Changed

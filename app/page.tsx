@@ -122,34 +122,7 @@ export default function HomePage() {
   const [base64Output, setBase64Output] = useState<string>("");
   const [base64Error, setBase64Error] = useState<string>("");
   const [base64Urls, setBase64Urls] = useState<string[]>([]);
-  const [redditBase64List, setRedditBase64List] = useState<string[]>([]);
-  const [fetchingReddit, setFetchingReddit] = useState<boolean>(false);
-  const [redditMeta, setRedditMeta] = useState<{ author?: string; createdUtc?: number; title?: string; subreddit?: string } | null>(null);
-
-  // Detect if input contains a Reddit URL
-  const hasRedditUrl = useMemo(() => {
-    const input = base64Input.trim();
-    if (!input) return false;
-    // Check for reddit.com or redd.it (short links)
-    return /reddit\.com\//.test(input) || /redd\.it\//.test(input);
-  }, [base64Input]);
-
-  // Format Unix timestamp to readable date
-  const formatTimestamp = useCallback((utc?: number): string => {
-    if (!utc) return "";
-    try {
-      const date = new Date(utc * 1000);
-      return date.toLocaleString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return "";
-    }
-  }, []);
+  const [hasInput, setHasInput] = useState<boolean>(false);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
@@ -848,79 +821,33 @@ export default function HomePage() {
     window.open(targetUrl, "_blank", "noopener,noreferrer");
   }
 
-  async function fetchRedditPost(url: string) {
-    setFetchingReddit(true);
-    setRedditBase64List([]);
-    setRedditMeta(null);
-    setBase64Error("");
+  // Smart paste handler - detects if clipboard has content and auto-decodes if it's valid Base64
+  async function smartPasteAndDecode() {
     try {
-      const res = await fetch("/api/fetch-reddit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-ZoneNew-Client": "1" },
-        body: JSON.stringify({ url }),
-      });
-      const json = await res.json().catch(() => ({ ok: false, error: "Invalid response from server" }));
-      if (!res.ok || !json.ok) {
-        const errorMsg = json.error || `Failed to fetch Reddit post (HTTP ${res.status})`;
-        setBase64Error(errorMsg);
-        showToast("Failed to fetch Reddit post", "error");
+      const text = await navigator.clipboard.readText();
+      if (!text || !text.trim()) {
+        setBase64Error("Clipboard is empty.");
         return;
       }
       
-      // Store metadata
-      if (json.meta) {
-        setRedditMeta(json.meta);
-      }
+      setBase64Input(text);
+      setBase64Error("");
+      setBase64Output("");
+      setBase64Urls([]);
       
-      if (json.base64Strings && json.base64Strings.length > 0) {
-        setRedditBase64List(json.base64Strings);
-        // Auto-fill the first Base64 string into the input
-        setBase64Input(json.base64Strings[0]);
-        showToast(`Found ${json.base64Strings.length} Base64 string${json.base64Strings.length > 1 ? "s" : ""}!`, "success");
-      } else {
-        setBase64Error("No Base64 strings found in this Reddit post. The post may contain credentials in a different format.");
-        showToast("No Base64 found", "warning");
+      // Auto-decode if valid Base64 detected
+      try {
+        const result = decodeBase64(text);
+        setBase64Output(result.decoded);
+        setBase64Urls(result.urls);
+        showToast("Pasted and decoded successfully!", "success");
+      } catch {
+        // Not valid Base64, just show pasted confirmation
+        showToast("Pasted from clipboard!", "success");
       }
-    } catch (e: unknown) {
-      const errorMsg = e instanceof Error ? e.message : "Network error. Please check your connection and try again.";
-      setBase64Error(errorMsg);
-      showToast("Failed to fetch Reddit post", "error");
-    } finally {
-      setFetchingReddit(false);
-    }
-  }
-
-  // Client-side fallback: Open Reddit post in new tab and guide user to copy-paste
-  function openRedditForManualCopy(url: string) {
-    // Clean the URL for viewing
-    let cleanUrl = url.trim();
-    if (!cleanUrl.startsWith("http")) {
-      cleanUrl = "https://" + cleanUrl;
-    }
-    // Remove tracking parameters for cleaner URL
-    try {
-      const urlObj = new URL(cleanUrl);
-      ["utm_source", "utm_medium", "utm_name", "utm_term", "utm_content"].forEach(p => urlObj.searchParams.delete(p));
-      cleanUrl = urlObj.toString();
     } catch {
-      // Keep original if parsing fails
+      setBase64Error("Could not access clipboard. Please paste manually.");
     }
-    
-    setBase64Error(
-      "Reddit API access is restricted. Opening post in new tab...\n\n" +
-      "📋 Manual Instructions:\n" +
-      "1. Find the Base64 text in the Reddit post (looks like: aHR0cHM6Ly9wYXN0ZS5zaC8... )\n" +
-      "2. Copy the entire Base64 string\n" +
-      "3. Paste it here and click Decode\n\n" +
-      "The Base64 usually starts with 'aHR0' and ends with '='"
-    );
-    
-    // Open in new tab after short delay so user sees the message
-    setTimeout(() => {
-      window.open(cleanUrl, "_blank", "noopener,noreferrer");
-    }, 500);
-    
-    showToast("Opening Reddit post - copy the Base64 text and paste here", "info");
   }
 
   const filteredXtreamChannels = useMemo(() => {
@@ -1933,8 +1860,11 @@ export default function HomePage() {
                   <textarea
                     className="bulkTextarea"
                     value={base64Input}
-                    onChange={(e) => setBase64Input(e.target.value)}
-                    placeholder="Paste messy Base64 here (e.g., 'check this aHR0c...') or Reddit URL"
+                    onChange={(e) => {
+                      setBase64Input(e.target.value);
+                      setHasInput(!!e.target.value.trim());
+                    }}
+                    placeholder="Paste Base64 string here (starts with aHR0, ends with =)"
                     rows={4}
                     style={{ minHeight: 80 }}
                   />
@@ -1942,80 +1872,22 @@ export default function HomePage() {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {/* Smart Paste button - auto-decodes if valid Base64 */}
                   <button
                     className="btn primary"
+                    onClick={smartPasteAndDecode}
+                  >
+                    Paste & Decode
+                  </button>
+                  
+                  {/* Decode button - for manual input */}
+                  <button
+                    className="btn"
                     onClick={handleBase64Decode}
                     disabled={!base64Input.trim()}
                   >
                     Decode
                   </button>
-                  
-                  {/* Paste button - always visible */}
-                  <button
-                    className="btn"
-                    onClick={async () => {
-                      try {
-                        const text = await navigator.clipboard.readText();
-                        setBase64Input(text);
-                        setBase64Error("");
-                        showToast("Pasted from clipboard!", "success");
-                      } catch {
-                        setBase64Error("Could not access clipboard. Please paste manually.");
-                      }
-                    }}
-                  >
-                    Paste
-                  </button>
-                  
-                  {/* Fetch button - only shown when Reddit URL detected */}
-                  {hasRedditUrl && (
-                    <button
-                      className="btn"
-                      style={{ 
-                        background: "rgba(255, 69, 0, 0.15)", 
-                        borderColor: "rgba(255, 69, 0, 0.35)" 
-                      }}
-                      onClick={async () => {
-                        const url = base64Input.trim();
-                        // Try API first
-                        await fetchRedditPost(url);
-                        // If error occurred, offer manual fallback
-                        if (base64Error && base64Error.includes("Reddit")) {
-                          // Wait a moment then offer manual copy option
-                          setTimeout(() => {
-                            if (window.confirm("Reddit API is blocked. Would you like to open the post in a new tab to manually copy the Base64 text?")) {
-                              openRedditForManualCopy(url);
-                            }
-                          }, 100);
-                        }
-                      }}
-                      disabled={fetchingReddit}
-                    >
-                      {fetchingReddit ? (
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span className="spinner" /> Fetching...
-                        </span>
-                      ) : (
-                        "Fetch from Reddit"
-                      )}
-                    </button>
-                  )}
-                  
-                  {/* Manual copy helper button */}
-                  {hasRedditUrl && (
-                    <button
-                      className="btn"
-                      style={{ 
-                        background: "rgba(251, 191, 36, 0.15)", 
-                        borderColor: "rgba(251, 191, 36, 0.35)",
-                        fontSize: 12
-                      }}
-                      onClick={() => openRedditForManualCopy(base64Input.trim())}
-                      title="Open Reddit post to manually copy Base64"
-                    >
-                      Open Reddit ↗
-                    </button>
-                  )}
                   
                   <button
                     className="btn danger"
@@ -2024,44 +1896,12 @@ export default function HomePage() {
                       setBase64Output("");
                       setBase64Error("");
                       setBase64Urls([]);
-                      setRedditBase64List([]);
-                      setRedditMeta(null);
+                      setHasInput(false);
                     }}
                   >
                     Clear
                   </button>
                 </div>
-
-                {/* Multiple Base64 strings from Reddit */}
-                {redditBase64List.length > 1 && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 6, textTransform: "uppercase" }}>
-                      FOUND {redditBase64List.length} BASE64 STRINGS - CLICK TO SELECT
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {redditBase64List.map((b64, idx) => (
-                        <button
-                          key={idx}
-                          className="btn small"
-                          onClick={() => {
-                            setBase64Input(b64);
-                            setBase64Output("");
-                            setBase64Urls([]);
-                          }}
-                          style={{
-                            textAlign: "left",
-                            fontFamily: "monospace",
-                            fontSize: 11,
-                            background: base64Input === b64 ? "rgba(19, 141, 224, 0.22)" : undefined,
-                            borderColor: base64Input === b64 ? "rgba(19, 141, 224, 0.38)" : undefined,
-                          }}
-                        >
-                          #{idx + 1}: {b64.slice(0, 50)}{b64.length > 50 ? "..." : ""}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 {base64Output && (
                   <div style={{ marginTop: 4 }}>
@@ -2088,22 +1928,6 @@ export default function HomePage() {
                           alignItems: "center"
                         }}>
                           <span>URL{base64Urls.length > 1 ? "S" : ""} FOUND</span>
-                          {redditMeta?.author && (
-                            <span style={{ 
-                              fontSize: 10, 
-                              color: "var(--muted)", 
-                              textTransform: "none",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 4
-                            }}>
-                              <span style={{ opacity: 0.7 }}>by</span>
-                              <span style={{ color: "var(--ok)", fontWeight: 500 }}>u/{redditMeta.author}</span>
-                              {redditMeta.createdUtc && (
-                                <span style={{ opacity: 0.7 }}>• {formatTimestamp(redditMeta.createdUtc)}</span>
-                              )}
-                            </span>
-                          )}
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                           {base64Urls.map((url, idx) => (
