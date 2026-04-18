@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-04-18
+
+### Changed
+
+**UI Cleanup:**
+- **Removed Empty State Section**: Eliminated the "Ready for input" placeholder that created excessive vertical gap
+- **Cleaner Layout**: Reduced visual clutter in Base64 mode
+- **Better Space Efficiency**: More compact UI without the empty state banner
+
 ## [3.1.1] - 2026-04-18
 
 ### Changed

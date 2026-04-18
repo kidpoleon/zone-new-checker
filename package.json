@@ -1,6 +1,6 @@
 {
   "name": "zone-new-checker",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "Professional IPTV credential validator with smart Base64 decoding",
   "private": true,
   "author": "kidpoleon <kidpoleon@proton.me>",
